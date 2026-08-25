@@ -11,6 +11,12 @@ possible way to fail: it looks like it worked.
 The whole suite passed because it ran `node src/index.mjs`, the DIRECT path, where the comparison holds. Testing
 the file is not testing the artifact.
 
+⚠️ **This version was published BY HAND, so it carries no provenance attestation.** The OIDC pipeline is in
+place and signs correctly, but npm answers `404 PUT` to it for this package — the Trusted Publisher binding on
+`@fabappai/cli` is not yet recognised, while the identical setup on `@fabappai/sdk` works. Publishing by hand was
+the trade: 0.1.0 was live and broken, and every `npx @fabappai/cli` was failing silently. The tarball is byte-identical
+to the one CI built (shasum `6184fbfb1ea3025755de7491c9fb0e54f6305661`). The next release goes through the pipeline.
+
 The guard now resolves the symlink with `realpathSync`, and there are three tests that **pack, install and call the
 binary** — what a user does. Mutation-verified: I reintroduced 0.1.0's exact defect and all three failed. CI and
 publish no longer check `node src/index.mjs`.
