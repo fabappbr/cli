@@ -1,0 +1,37 @@
+{
+  "name": "@fabappai/cli",
+  "version": "0.1.0",
+  "description": "A linha de comando da Fabapp: traga a definição do projeto para o disco, rode o app localmente, publique de volta. Inclui um servidor MCP.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "fabapp": "./src/index.mjs"
+  },
+  "files": [
+    "src",
+    "CHANGELOG.md",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fabappbr/cli.git"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "fabapp",
+    "cli",
+    "mcp",
+    "backend"
+  ],
+  "homepage": "https://github.com/fabappbr/cli#readme",
+  "bugs": {
+    "url": "https://github.com/fabappbr/cli/issues"
+  }
+}

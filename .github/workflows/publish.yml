@@ -1,0 +1,62 @@
+# Publicação do @fabappai/cli no npm.
+#
+# POR QUE OIDC E NÃO UM TOKEN. Este pacote roda na máquina de quem desenvolve e SEGURA A CREDENCIAL DELE. Um token
+# de publish vazado deixaria alguém empurrar uma versão que lê o chaveiro de todo mundo que instalou. Trusted
+# Publishing troca o token de longa duração por um OIDC de vida curta que o npm valida contra ESTE repositório e
+# ESTE arquivo — não existe segredo para vazar.
+#
+# ANTES DO PRIMEIRO RELEASE, no npmjs.com: Settings do pacote → Trusted Publisher → fabappbr / cli / publish.yml.
+#
+# Dispara só por TAG. Nunca por branch, nunca da máquina de ninguém.
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write        # o token OIDC; sem isto o npm recusa
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted Publishing exige npm >= 11.5.1. O Node 24 já traz um npm 11.x — conferimos em vez de instalar, para
+      # não acoplar este workflow ao calendário de lançamento do npm.
+      - name: npm sabe fazer Trusted Publishing
+        run: |
+          have="$(npm -v)"; need=11.5.1
+          printf '%s\n%s\n' "$need" "$have" | sort -V -C \
+            || { echo "::error::npm $have é anterior a $need"; exit 1; }
+          echo "npm $have · node $(node -v)"
+
+      # A tag é a fonte da verdade da versão: publicar 0.1.0 sob a tag v0.2.0 põe um número errado num registro
+      # imutável.
+      - name: a tag bate com a versão do package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          test "$tag" = "$pkg" || { echo "::error::tag $tag ≠ package.json $pkg"; exit 1; }
+
+      - run: node --test test/*.test.mjs
+      - name: o binário sobe e responde
+        run: node src/index.mjs help | grep -q "fabapp login"
+
+      # O que vai para o registro lido do TARBALL de verdade, atrás do que não pode sair de casa.
+      - name: o tarball não leva rota interna nem chave
+        run: |
+          npm pack --silent >/dev/null
+          tar -xzOf ./*.tgz > /tmp/bundle.txt
+          if grep -nE 'fabapp\.ai/(staff|admin)|sk_live|sk_test|AIza[0-9A-Za-z_-]{20,}|ghp_[0-9A-Za-z]{20,}' /tmp/bundle.txt; then
+            echo "::error::o tarball carrega rota interna ou algo com formato de credencial"
+            exit 1
+          fi
+
+      - run: npm publish --provenance --access public

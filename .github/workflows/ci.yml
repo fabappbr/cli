@@ -1,0 +1,36 @@
+# Gate de todo push e todo PR. Os MESMOS passos do publish, menos o publish.
+#
+# Uma tag é o pior momento para descobrir que um teste quebrou: a versão já foi decidida e o conserto vira uma tag
+# nova. Aqui o sinal chega no push que causou.
+#
+# Não há `npm ci`: este pacote tem ZERO dependências, e isso é decisão de segurança (ele guarda uma credencial e
+# fala com o backend de alguém). Se um dia aparecer um `node_modules`, este passo quebra — e é para quebrar.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "24" }
+      - name: sem dependências (é o desenho, não um acaso)
+        run: |
+          test ! -d node_modules || { echo "::error::apareceu um node_modules — este pacote não tem dependências"; exit 1; }
+          node -e "const d=require('./package.json'); if (d.dependencies && Object.keys(d.dependencies).length) { console.error('::error::dependências declaradas: ' + Object.keys(d.dependencies)); process.exit(1); }"
+      - run: node --test test/*.test.mjs
+      - name: o binário sobe e responde
+        run: node src/index.mjs help | grep -q "fabapp login"
