@@ -33,7 +33,7 @@ export async function request(host, path, { method = "GET", body, token } = {}) 
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (e) {
-    throw new ApiError(0, `não consegui falar com ${host}: ${e.message}`);
+    throw new ApiError(0, `could not reach ${host}: ${e.message}`);
   }
   if (res.status === 204) return null;
   const text = await res.text();

@@ -1,13 +1,13 @@
 /**
- * `fabapp dev` — o app rodando na sua máquina, com o mesmo template que a plataforma usa no build.
+ * `fabapp dev` — the app running on your machine, on the same template the platform builds with.
  *
- * O risco que este comando tem de tratar não é montar o workspace: é a DIVERGÊNCIA. O template — a casca, o SDK, os
- * componentes, o piso de dependências — é copiado do `services/gen-template` a cada build da plataforma, então uma
- * cópia local envelhece sozinha. O modo de falha é o pior possível para um comando chamado `dev`: funciona aqui,
- * sai diferente em produção, e nada avisa.
+ * The risk this command has to handle is not assembling the workspace: it is DRIFT. The template — the shell, the
+ * SDK, the components, the dependency floor — is copied fresh from `services/gen-template` on every platform build,
+ * so a local copy goes stale on its own. The failure mode is the worst one possible for a command called `dev`: it
+ * works here, comes out different in production, and nothing warns you.
  *
- * Por isso o workspace guarda a ASSINATURA do template que veio dentro dele, e toda execução compara. Divergiu, ele
- * DIZ — e não conserta sozinho, porque consertar sozinho significaria escrever por cima do que você editou.
+ * So the workspace records the SIGNATURE of the template it came from, and every run compares. On a mismatch it
+ * SAYS SO — and does not fix itself, because fixing itself would mean writing over what you edited.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -26,7 +26,7 @@ function unzip(zip, into) {
       return cmd;
     } catch { /* try the next one */ }
   }
-  throw new Error("não achei `unzip` nem `tar` para descompactar o pacote");
+  throw new Error("found neither `unzip` nor `tar` to unpack the bundle");
 }
 
 /** The zip has a single top-level folder; the workspace is what is inside it. */
@@ -38,20 +38,20 @@ function onlyChild(dir) {
 
 async function download(url, to) {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`não consegui baixar o pacote (${res.status})`);
+  if (!res.ok) throw new Error(`could not download the bundle (${res.status})`);
   writeFileSync(to, Buffer.from(await res.arrayBuffer()));
 }
 
 async function pickApp({ host, token, projectId, wanted }) {
   const apps = await request(host, `/projects/${encodeURIComponent(projectId)}/apps`, { token });
-  if (!apps.length) throw new Error("este projeto não tem nenhuma surface ainda");
+  if (!apps.length) throw new Error("this project has no surface yet");
   if (wanted) {
     const found = apps.find((a) => a.slug === wanted || a.id === wanted);
-    if (!found) throw new Error(`não achei a surface '${wanted}' — tem: ${apps.map((a) => a.slug).join(", ")}`);
+    if (!found) throw new Error(`no surface named '${wanted}' — this project has: ${apps.map((a) => a.slug).join(", ")}`);
     return found;
   }
   if (apps.length > 1) {
-    throw new Error(`este projeto tem ${apps.length} surfaces — escolha com --app ` +
+    throw new Error(`this project has ${apps.length} surfaces — pick one with --app ` +
                     `(${apps.map((a) => a.slug).join(", ")})`);
   }
   return apps[0];
@@ -69,12 +69,12 @@ export async function dev({ host, token, projectId, root, app: wanted, reset = f
   const stamp = readStamp(root);
 
   if (reset && existsSync(workspace)) {
-    log("  Refazendo o workspace do zero (--reset)…");
+    log("  Rebuilding the workspace from scratch (--reset)…");
     rmSync(workspace, { recursive: true, force: true });
   }
 
   if (!existsSync(join(workspace, "package.json"))) {
-    log(`  Montando o workspace de '${app.slug}'…`);
+    log(`  Assembling the workspace for '${app.slug}'…`);
     const out = await request(host, `/projects/${encodeURIComponent(projectId)}/apps/${encodeURIComponent(app.id)}/export`,
                               { method: "POST", token });
     const zip = join(tmpdir(), `fabapp-${app.id}.zip`);
@@ -86,33 +86,33 @@ export async function dev({ host, token, projectId, root, app: wanted, reset = f
     execFileSync("cp", ["-R", onlyChild(staging) + "/", workspace + "/"]);
     rmSync(zip, { force: true });
     rmSync(staging, { recursive: true, force: true });
-    // A IMPRESSÃO de cada arquivo, gravada agora que o workspace é exatamente o que a plataforma entregou. É o
-    // que permite ao `deploy` enviar só o que VOCÊ mudou, em vez de empurrar os arquivos da plataforma junto.
+    // The FINGERPRINT of every file, taken now that the workspace is exactly what the platform handed over. It is
+    // what lets `deploy` send only what YOU changed, instead of pushing the platform's files along with it.
     writeStamp(root, { app_id: app.id, template: out.template || "", files: fingerprint(workspace) });
-    log(`  ✓ Workspace em .fabapp/workspace · template ${out.template || "(desconhecido)"}`);
+    log(`  ✓ Workspace at .fabapp/workspace · template ${out.template || "(unknown)"}`);
   } else {
-    // O workspace EXISTE e tem edições suas. Comparar é o serviço deste comando; escrever por cima não é.
+    // The workspace EXISTS and holds your edits. Comparing is this command's job; overwriting is not.
     const current = app.template_sig || "";
     const local = stamp?.template || "";
     if (current && local && current !== local) {
       log("");
-      log(`  ⚠ O template mudou desde que este workspace foi montado.`);
-      log(`      aqui:        ${local}`);
-      log(`      na plataforma: ${current}`);
-      log("    O que roda aqui pode sair diferente no build. `fabapp dev --reset` refaz o workspace —");
-      log("    e ele APAGA o que você editou dentro de .fabapp/workspace, então salve antes.");
+      log(`  ⚠ The template changed since this workspace was assembled.`);
+      log(`      here:            ${local}`);
+      log(`      on the platform: ${current}`);
+      log("    What runs here may come out different in the build. `fabapp dev --reset` rebuilds the workspace —");
+      log("    and it DELETES what you edited inside .fabapp/workspace, so save first.");
       log("");
     } else if (!local) {
-      log("  ⚠ Este workspace não registra de qual template veio — não consigo confirmar que confere.");
+      log("  ⚠ This workspace does not record which template it came from — I cannot confirm it matches.");
     }
   }
 
   if (!existsSync(join(workspace, "node_modules"))) {
-    log("  Instalando as dependências (só na primeira vez)…");
+    log("  Installing dependencies (first run only)…");
     await install(workspace);
   }
 
-  log(`\n  Subindo o Vite em .fabapp/workspace…\n`);
+  log(`\n  Starting Vite in .fabapp/workspace…\n`);
   return run(workspace, port);
 }
 

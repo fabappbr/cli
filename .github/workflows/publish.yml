@@ -1,13 +1,13 @@
-# Publicação do @fabappai/cli no npm.
+# Publishing @fabappai/cli to npm.
 #
-# POR QUE OIDC E NÃO UM TOKEN. Este pacote roda na máquina de quem desenvolve e SEGURA A CREDENCIAL DELE. Um token
-# de publish vazado deixaria alguém empurrar uma versão que lê o chaveiro de todo mundo que instalou. Trusted
-# Publishing troca o token de longa duração por um OIDC de vida curta que o npm valida contra ESTE repositório e
-# ESTE arquivo — não existe segredo para vazar.
+# WHY OIDC AND NOT A TOKEN. This package runs on a developer's machine and HOLDS THEIR CREDENTIAL. A leaked publish
+# token would let somebody push a version that reads the keychain of everyone who installed it. Trusted Publishing
+# swaps the long-lived token for a short-lived OIDC one that npm validates against THIS repository and THIS file —
+# there is no secret to leak.
 #
-# ANTES DO PRIMEIRO RELEASE, no npmjs.com: Settings do pacote → Trusted Publisher → fabappbr / cli / publish.yml.
+# BEFORE THE FIRST RELEASE, on npmjs.com: package Settings → Trusted Publisher → fabappbr / cli / publish.yml.
 #
-# Dispara só por TAG. Nunca por branch, nunca da máquina de ninguém.
+# Triggered by a TAG only. Never by a branch, never from anybody's machine.
 name: publish
 
 on:
@@ -16,7 +16,7 @@ on:
 
 permissions:
   contents: read
-  id-token: write        # o token OIDC; sem isto o npm recusa
+  id-token: write        # the OIDC token; without this npm refuses
 
 jobs:
   publish:
@@ -28,34 +28,34 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
-      # Trusted Publishing exige npm >= 11.5.1. O Node 24 já traz um npm 11.x — conferimos em vez de instalar, para
-      # não acoplar este workflow ao calendário de lançamento do npm.
-      - name: npm sabe fazer Trusted Publishing
+      # Trusted Publishing requires npm >= 11.5.1. Node 24 already ships an npm 11.x — we check instead of
+      # installing, so this workflow is not coupled to npm's release calendar.
+      - name: npm can do Trusted Publishing
         run: |
           have="$(npm -v)"; need=11.5.1
           printf '%s\n%s\n' "$need" "$have" | sort -V -C \
-            || { echo "::error::npm $have é anterior a $need"; exit 1; }
+            || { echo "::error::npm $have is older than $need"; exit 1; }
           echo "npm $have · node $(node -v)"
 
-      # A tag é a fonte da verdade da versão: publicar 0.1.0 sob a tag v0.2.0 põe um número errado num registro
-      # imutável.
-      - name: a tag bate com a versão do package.json
+      # The tag is the source of truth for the version: publishing 0.1.0 under the tag v0.2.0 puts a wrong number
+      # into an immutable registry.
+      - name: the tag matches package.json
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg="$(node -p "require('./package.json').version")"
           test "$tag" = "$pkg" || { echo "::error::tag $tag ≠ package.json $pkg"; exit 1; }
 
-      # Inclui os testes que EMPACOTAM e INSTALAM o pacote e chamam o binário pelo symlink — a 0.1.0 saiu quebrada
-      # justamente porque a verificação era `node src/index.mjs`, que é o arquivo e não o artefato.
+      # Includes the tests that PACK and INSTALL the package and call the binary through the symlink — 0.1.0 shipped
+      # broken precisely because the check was `node src/index.mjs`, which is the file and not the artifact.
       - run: node --test test/*.test.mjs
 
-      # O que vai para o registro lido do TARBALL de verdade, atrás do que não pode sair de casa.
-      - name: o tarball não leva rota interna nem chave
+      # What goes to the registry, read from the real TARBALL, checked for what must not leave home.
+      - name: the tarball carries no internal route and no key
         run: |
           npm pack --silent >/dev/null
           tar -xzOf ./*.tgz > /tmp/bundle.txt
           if grep -nE 'fabapp\.ai/(staff|admin)|sk_live|sk_test|AIza[0-9A-Za-z_-]{20,}|ghp_[0-9A-Za-z]{20,}' /tmp/bundle.txt; then
-            echo "::error::o tarball carrega rota interna ou algo com formato de credencial"
+            echo "::error::the tarball carries an internal route or something shaped like a credential"
             exit 1
           fi
 

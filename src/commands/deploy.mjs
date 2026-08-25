@@ -1,9 +1,9 @@
 /**
- * `fabapp deploy` — o que você editou aqui vai para o ar.
+ * `fabapp deploy` — what you edited here goes live.
  *
- * Dois passos, e a ordem importa: primeiro o código sobe (`PUT /code`, com compare-and-swap), depois o app é
- * publicado. Publicar sem subir publicaria o que está no SERVIDOR — o comando pareceria funcionar e o trabalho
- * local ficaria para trás, que é a pior forma de um deploy falhar.
+ * Two steps, and the order matters: the code goes up first (`PUT /code`, with compare-and-swap), then the app is
+ * published. Publishing without uploading would publish what is on the SERVER — the command would look like it
+ * worked and the local work would be left behind, which is the worst way for a deploy to fail.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,36 +15,36 @@ export async function deploy({ host, token, projectId, root, log, publish = true
   const workspace = join(root, ".fabapp", "workspace");
   const stamp = readStamp(root);
   if (!existsSync(join(workspace, "package.json")) || !stamp?.app_id) {
-    throw new Error("não há workspace local — rode `fabapp dev` primeiro");
+    throw new Error("there is no local workspace — run `fabapp dev` first");
   }
   const appId = stamp.app_id;
   const base = `/projects/${encodeURIComponent(projectId)}/apps/${encodeURIComponent(appId)}`;
 
   const pristine = stamp.files || {};
   if (!Object.keys(pristine).length) {
-    throw new Error("este workspace foi montado por uma versão anterior do CLI e não registra o que veio da " +
-                    "plataforma — rode `fabapp dev --reset` (ele apaga suas edições, então salve antes)");
+    throw new Error("this workspace was assembled by an earlier CLI version and does not record what came from " +
+                    "the platform — run `fabapp dev --reset` (it deletes your edits, so save first)");
   }
   const { changed, added, removed } = changes(workspace, pristine);
 
   if (removed.length) {
-    // Relatado ANTES de qualquer atalho, e nunca aplicado. Uma remoção É mudança — sair calado por "nada mudou"
-    // deixaria a pessoa achando que o `deploy` não viu nada, quando o que ele viu foi justamente o que ele se
-    // recusa a fazer. E não apagar é a mesma regra do `pull`: o workspace pode estar velho em relação ao servidor,
-    // e apagar lá por causa de uma ausência aqui destrói trabalho que ninguém pediu para gerenciar.
-    log(`\n  Estes arquivos sumiram do workspace e eu NÃO os apaguei do app:`);
+    // Reported BEFORE any early exit, and never applied. A removal IS a change — leaving quietly on "nothing
+    // changed" would leave the person thinking `deploy` saw nothing, when what it saw was precisely the thing it
+    // refuses to do. And not deleting is the same rule as `pull`: the workspace may be stale relative to the
+    // server, and deleting there because of an absence here destroys work nobody asked us to manage.
+    log(`\n  These files disappeared from the workspace and I did NOT delete them from the app:`);
     for (const p of removed) log(`    ? ${p}`);
-    log("    Apague pelo Studio se for de propósito.\n");
+    log("    Delete them in Studio if that was on purpose.\n");
   }
 
   if (!changed.length && !added.length) {
-    log("  Nada mudou no workspace desde que ele foi montado.");
+    log("  Nothing changed in the workspace since it was assembled.");
     if (!publish) return 0;
   }
 
-  // O conjunto DESEJADO, e não um delta: o `PUT /code` substitui a lista inteira. Parte-se do que o servidor tem
-  // agora — que pode ter mudado, se a IA editou o app no Studio nesse meio-tempo — e aplicam-se as suas edições
-  // por cima. Assim o trabalho de lá não some por causa de um workspace velho.
+  // The DESIRED set, not a delta: `PUT /code` replaces the whole list. It starts from what the server has right
+  // now — which may have moved, if the AI edited the app in Studio meanwhile — and lays your edits on top. That way
+  // the work over there does not vanish because of a stale workspace.
   const current = await request(host, `${base}/code`, { token });
   const files = new Map((current.files || []).map((f) => [f.path, f.content]));
   for (const p of [...changed, ...added]) files.set(p, readFileSync(join(workspace, p), "utf8"));
@@ -53,23 +53,23 @@ export async function deploy({ host, token, projectId, root, log, publish = true
   const saved = await request(host, `${base}/code`, {
     method: "PUT", token, body: { files: payload, code_rev: current.code_rev },
   });
-  log(`  ✓ ${changed.length} editado(s), ${added.length} novo(s) · code_rev ${saved.code_rev}`);
+  log(`  ✓ ${changed.length} edited, ${added.length} new · code_rev ${saved.code_rev}`);
   for (const p of [...changed, ...added]) log(`    ~ ${p}`);
   if (saved.provided_ignored?.length) {
-    // Sem isto, editar um arquivo da plataforma seria um save que responde 200 e não muda nada.
-    log(`\n  Estes são da plataforma e o app não pode reescrevê-los — foram ignorados:`);
+    // Without this, editing a platform file would be a save that answers 200 and changes nothing.
+    log(`\n  These belong to the platform and the app cannot overwrite them — they were ignored:`);
     for (const p of saved.provided_ignored) log(`    ! ${p}`);
   }
 
   if (!publish) return 0;
-  log("\n  Publicando…");
+  log("\n  Publishing…");
   const out = await request(host, `${base}/publish`, { method: "POST", token });
-  // A impressão é regravada: o que acabou de subir passa a ser a nova base do "o que mudou".
+  // The fingerprint is rewritten: what just went up becomes the new baseline for "what changed".
   writeStamp(root, { ...stamp, files: fingerprint(workspace) });
-  log(`  ✓ No ar: ${out.bundle_url || "(sem URL)"}`);
+  log(`  ✓ Live: ${out.bundle_url || "(no URL)"}`);
   if (out.template_sig && stamp.template && out.template_sig !== stamp.template) {
-    log(`\n  ⚠ A plataforma buildou com o template ${out.template_sig}; seu workspace veio do ${stamp.template}.`);
-    log("    O que você viu no `dev` pode diferir do que está no ar. `fabapp dev --reset` alinha os dois.");
+    log(`\n  ⚠ The platform built with template ${out.template_sig}; your workspace came from ${stamp.template}.`);
+    log("    What you saw in `dev` may differ from what is live. `fabapp dev --reset` aligns the two.");
   }
   return 0;
 }

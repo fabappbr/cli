@@ -1,7 +1,7 @@
 {
   "name": "@fabappai/cli",
   "version": "0.1.1",
-  "description": "A linha de comando da Fabapp: traga a definição do projeto para o disco, rode o app localmente, publique de volta. Inclui um servidor MCP.",
+  "description": "The Fabapp command line: bring the project definition to disk, run the app locally, publish it back. Includes an MCP server.",
   "license": "MIT",
   "type": "module",
   "bin": {

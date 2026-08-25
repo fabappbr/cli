@@ -1,23 +1,28 @@
 /**
- * O servidor MCP da Fabapp, sobre stdio.
+ * Fabapp's MCP server, over stdio.
  *
- * JSON-RPC 2.0 delimitado por linha, escrito à mão porque o CLI não tem dependências e o protocolo cabe num
- * arquivo. Quem sobe o processo é o cliente (Claude Code, o app de desktop); a credencial é a MESMA que o
- * `fabapp login` guardou no chaveiro — este servidor nunca pede nem mostra segredo.
+ * Line-delimited JSON-RPC 2.0, hand-written because the CLI has no dependencies and the protocol fits in one file.
+ * The client is what starts the process (Claude Code, the desktop app); the credential is the SAME one `fabapp
+ * login` put in the keychain — this server never asks for a secret and never shows one.
  *
- * ⚠️ NADA VAI PARA O STDOUT ALÉM DE JSON-RPC. Um `console.log` de depuração no meio corrompe o fluxo e o cliente
- * desconecta com um erro de parse que não aponta para a causa. Log é stderr, sempre.
+ * ⚠️ NOTHING BUT JSON-RPC GOES TO STDOUT. One debugging `console.log` in the middle corrupts the stream and the
+ * client disconnects with a parse error that points nowhere near the cause. Logging is stderr, always.
  */
+import { createRequire } from "node:module";
 import { createInterface } from "node:readline";
 
 import { findTool, toolsFor } from "./tools.mjs";
 
-// Versões do protocolo que este servidor entende. Ecoamos a do cliente quando conhecida — um cliente antigo
-// falando com um servidor novo é o caso comum, e negociar para baixo é o que mantém os dois funcionando.
+// Protocol versions this server understands. We echo the client's when we know it — an old client talking to a
+// new server is the common case, and negotiating down is what keeps the two working.
 const SUPPORTED = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const LATEST = SUPPORTED[0];
 
 const log = (...a) => process.stderr.write(a.join(" ") + "\n");
+
+// READ, not repeated. A hand-written copy here reported 0.1.0 for the whole life of 0.1.1 — and the version an
+// MCP client shows is the one a bug report names, so it would have pointed at the release that never had the bug.
+const VERSION = createRequire(import.meta.url)("../../package.json").version;
 
 function reply(write, id, result) {
   write(JSON.stringify({ jsonrpc: "2.0", id, result }));
@@ -27,7 +32,7 @@ function fail(write, id, code, message, data) {
   write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message, ...(data ? { data } : {}) } }));
 }
 
-/** O resultado de uma ferramenta, no formato que o MCP espera. `isError` deixa o modelo ver a falha e reagir. */
+/** A tool's result, in the shape MCP expects. `isError` lets the model see the failure and react to it. */
 function content(value, isError = false) {
   return { content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
            isError };
@@ -43,11 +48,11 @@ export function createServer({ host, creds, write, exit = () => {} }) {
       return {
         protocolVersion: SUPPORTED.includes(asked) ? asked : LATEST,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "fabapp", version: "0.1.0" },
-        // Dito na abertura porque decide o que o modelo pode planejar: com um token só-leitura metade das
-        // ferramentas não existe, e é melhor que ele saiba disso antes de montar um plano que não roda.
-        instructions: `Conta ${creds?.account_id || "?"} · escopo: ${scopes}.`
-          + (scopes.includes("write") ? "" : " Somente leitura: nenhuma ferramenta de escrita está disponível."),
+        serverInfo: { name: "fabapp", version: VERSION },
+        // Said at the opening because it decides what the model can plan: with a read-only token half the tools
+        // do not exist, and it is better it knows that before assembling a plan that cannot run.
+        instructions: `Account ${creds?.account_id || "?"} · scope: ${scopes}.`
+          + (scopes.includes("write") ? "" : " Read-only: no write tool is available."),
       };
     },
 
@@ -58,19 +63,19 @@ export function createServer({ host, creds, write, exit = () => {} }) {
     async "tools/call"(params) {
       const tool = findTool(params?.name, scopes);
       if (!tool) {
-        // A distinção importa para o modelo: "não existe" ele para de tentar; "seu token não tem" ele pede a
-        // autorização certa à pessoa em vez de reformular argumentos até desistir.
+        // The distinction matters to the model: on "does not exist" it stops trying; on "your token lacks it"
+        // it asks the person for the right authorisation instead of rewording arguments until it gives up.
         const known = toolsFor("read write").some((t) => t.name === params?.name);
         return content(known
-          ? `A ferramenta '${params.name}' precisa do escopo de escrita, e este token tem apenas '${scopes}'. `
-            + "Autorize de novo com `fabapp login --scopes \"read write\"`."
-          : `Ferramenta desconhecida: ${params?.name}`, true);
+          ? `The tool '${params.name}' needs the write scope, and this token only has '${scopes}'. `
+            + "Authorise again with `fabapp login --scopes \"read write\"`."
+          : `Unknown tool: ${params?.name}`, true);
       }
       try {
         return content(await tool.run({ host, token, creds }, params?.arguments || {}));
       } catch (e) {
-        // Falha de ferramenta vira RESULTADO com isError, e não erro de protocolo: assim o modelo lê a mensagem
-        // ("regra de acesso inválida em message.access") e corrige, em vez de ver a conexão morrer.
+        // A tool failure becomes a RESULT with isError, not a protocol error: that way the model reads the
+        // message ("invalid access rule at message.access") and corrects it, instead of watching the link die.
         return content(`${e.status ? `HTTP ${e.status}: ` : ""}${e.message}`, true);
       }
     },
@@ -78,8 +83,8 @@ export function createServer({ host, creds, write, exit = () => {} }) {
 
   return async function handle(line) {
     let msg;
-    try { msg = JSON.parse(line); } catch { return fail(write, null, -32700, "JSON inválido"); }
-    // Uma notificação (sem `id`) não recebe resposta — responder a uma quebra clientes estritos.
+    try { msg = JSON.parse(line); } catch { return fail(write, null, -32700, "invalid JSON"); }
+    // A notification (no `id`) gets no reply — answering one breaks strict clients.
     const isNotification = msg.id === undefined || msg.id === null;
     if (msg.method === "notifications/initialized") return;
     if (msg.method === "exit") return exit(0);
@@ -87,30 +92,29 @@ export function createServer({ host, creds, write, exit = () => {} }) {
     const fn = handlers[msg.method];
     if (!fn) {
       if (isNotification) return;
-      return fail(write, msg.id, -32601, `método não suportado: ${msg.method}`);
+      return fail(write, msg.id, -32601, `unsupported method: ${msg.method}`);
     }
     try {
       const result = await fn(msg.params);
       if (!isNotification) reply(write, msg.id, result);
     } catch (e) {
-      log(`[fabapp-mcp] ${msg.method} falhou: ${e.message}`);
+      log(`[fabapp-mcp] ${msg.method} failed: ${e.message}`);
       if (!isNotification) fail(write, msg.id, -32603, e.message);
     }
   };
 }
 
 /**
- * Sobe o servidor lendo stdin e escrevendo stdout. Uma linha por mensagem.
+ * Starts the server reading stdin and writing stdout. One line per message.
  *
- * As respostas em voo são ESPERADAS no fechamento. Sem isso, o fim do stdin encerrava o processo enquanto uma
- * chamada de ferramenta ainda estava no meio da requisição HTTP — e a resposta simplesmente nunca saía. Um cliente
- * de verdade mantém o stdin aberto, então o defeito só aparece quando alguém alimenta o servidor por um pipe, que
- * é justamente como se testa e como se depura.
+ * In-flight replies are AWAITED on close. Without that, the end of stdin ended the process while a tool call was
+ * still mid HTTP request — and the reply simply never came out. A real client keeps stdin open, so the defect only
+ * shows up when somebody feeds the server through a pipe, which is exactly how it gets tested and debugged.
  */
 export function serve({ host, creds }) {
   const write = (s) => process.stdout.write(s + "\n");
   const handle = createServer({ host, creds, write, exit: (c) => process.exit(c) });
-  log(`[fabapp-mcp] pronto · conta ${creds?.account_id} · escopo ${creds?.scope}`);
+  log(`[fabapp-mcp] ready · account ${creds?.account_id} · scope ${creds?.scope}`);
 
   const inFlight = new Set();
   const rl = createInterface({ input: process.stdin });
@@ -121,8 +125,8 @@ export function serve({ host, creds }) {
   });
   return new Promise((resolve) => {
     rl.on("close", async () => {
-      // `allSettled` e não `all`: uma ferramenta que falhou já respondeu com `isError`, e derrubar o
-      // encerramento por causa dela perderia as respostas das outras.
+      // `allSettled` and not `all`: a tool that failed has already answered with `isError`, and letting it take
+      // the shutdown down with it would lose the other replies.
       while (inFlight.size) await Promise.allSettled([...inFlight]);
       resolve(0);
     });

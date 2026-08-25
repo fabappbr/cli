@@ -1,33 +1,32 @@
-# Segurança
+# Security
 
-## Como relatar uma vulnerabilidade
+## Reporting a vulnerability
 
-Escreva para **security@fabapp.com**. Não abra issue pública para uma vulnerabilidade — um relato no tracker é
-legível por todo mundo, inclusive por quem a usaria, antes de existir correção para instalar.
+Write to **security@fabapp.com**. Do not open a public issue for a vulnerability — a report on the tracker is
+readable by everybody, including whoever would use it, before there is a fix to install.
 
-Confirmamos em **até 2 dias úteis** e damos uma avaliação inicial em **até 7**. Você decide se quer crédito
-público. Não há programa de recompensa no momento, e preferimos dizer isso a deixar a pergunta no ar.
+We acknowledge within **2 business days** and give an initial assessment within **7**. You decide whether you want
+public credit. There is no bounty programme at the moment, and we would rather say so than leave the question open.
 
-## O que este pacote é, em termos de risco
+## What this package is, in terms of risk
 
-Ele **guarda uma credencial** e **fala com o backend de alguém**. Tudo abaixo decorre dessas duas frases.
+It **holds a credential** and **talks to somebody's backend**. Everything below follows from those two sentences.
 
-- **Zero dependências.** Todo pacote no grafo poderia alcançar as duas coisas.
-- **O chaveiro do sistema primeiro**, um arquivo `0600` só como recurso — e o recurso é **dito em voz alta**. Uma
-  ferramenta que cai calada para um lugar pior ensina que é sempre seguro.
-- **Fluxo de dispositivo (RFC 8628).** Nenhuma chave longa é mostrada a um humano nem digitada num terminal.
-- **Escopo separado.** `read` é o padrão; escrever é concessão explícita.
-- **Escopado a uma conta**, não à identidade.
-- **Publicado por Trusted Publishing (OIDC)** com `--provenance`: não existe token de npm de longa duração em lugar
-  nenhum.
+- **Zero dependencies.** Every package in the graph could reach both of those things.
+- **The system keychain first**, a `0600` file only as a fallback — and the fallback is **said out loud**. A tool
+  that quietly drops to a worse place teaches you it is always safe.
+- **Device flow (RFC 8628).** No long-lived key is shown to a human or typed into a terminal.
+- **Separate scopes.** `read` is the default; writing is an explicit grant.
+- **Scoped to an account**, not to the identity.
+- **Published through Trusted Publishing (OIDC)** with `--provenance`: there is no long-lived npm token anywhere.
 
-## O que ele nunca faz
+## What it never does
 
-- **Não escreve fora da pasta do projeto.** Um caminho vindo do servidor que saia da raiz é recusado.
-- **Não apaga.** Arquivo que sumiu é relatado, nunca removido do app.
-- **Não guarda segredo de integração em disco.** Connector e integração se gerenciam na plataforma.
+- **It does not write outside the project folder.** A path coming from the server that escapes the root is refused.
+- **It does not delete.** A file that disappeared is reported, never removed from the app.
+- **It does not keep an integration secret on disk.** Connectors and integrations are managed on the platform.
 
-Verifique uma versão:
+Verify a release:
 
 ```bash
 npm audit signatures

@@ -1,18 +1,19 @@
 /**
- * O servidor MCP.
+ * The MCP server.
  *
- * O que mais importa aqui não é o protocolo — é o ESCOPO. Um token concedido só-leitura não pode ver as
- * ferramentas de escrita: anunciar uma que vai responder 403 é pior do que não anunciá-la, porque o modelo tenta,
- * falha, e tenta de novo com outros argumentos — a recusa parece problema do pedido e não da permissão.
+ * What matters most here is not the protocol — it is the SCOPE. A token granted read-only must not see the write
+ * tools: advertising one that will answer 403 is worse than not advertising it, because the model tries, fails,
+ * and tries again with different arguments — the refusal looks like a problem with the request, not the permission.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer as httpServer } from "node:http";
 import test from "node:test";
 
 import { createServer } from "../src/mcp/server.mjs";
 import { TOOLS, toolsFor } from "../src/mcp/tools.mjs";
 
-/** Um servidor MCP em memória: manda linhas, recebe respostas. */
+/** An in-memory MCP server: send lines, get replies. */
 function mcp({ scopes = "read write", host = "http://localhost:1", account = "acc-1" } = {}) {
   const out = [];
   const handle = createServer({
@@ -26,64 +27,64 @@ function mcp({ scopes = "read write", host = "http://localhost:1", account = "ac
   };
 }
 
-test("initialize negocia a versão do protocolo e diz o escopo", async () => {
+test("initialize negotiates the protocol version and states the scope", async () => {
   const s = mcp({ scopes: "read" });
   const r = await s.send({ jsonrpc: "2.0", id: 1, method: "initialize",
                            params: { protocolVersion: "2024-11-05" } });
-  // Ecoar a versão do cliente quando conhecida é o que mantém um cliente antigo funcionando com um servidor novo.
+  // Echoing the client's version when we know it is what keeps an old client working with a new server.
   assert.equal(r.result.protocolVersion, "2024-11-05");
   assert.equal(r.result.serverInfo.name, "fabapp");
-  assert.match(r.result.instructions, /Somente leitura/);
+  assert.match(r.result.instructions, /Read-only/);
 
   const novo = await mcp().send({ jsonrpc: "2.0", id: 1, method: "initialize",
                                   params: { protocolVersion: "1999-01-01" } });
-  assert.equal(novo.result.protocolVersion, "2025-06-18", "versão desconhecida deve cair na mais nova que sabemos");
+  assert.equal(novo.result.protocolVersion, "2025-06-18", "an unknown version must fall back to the newest one we know");
 });
 
-test("um token só-leitura NÃO vê as ferramentas de escrita", async () => {
+test("a read-only token does NOT see the write tools", async () => {
   const r = await mcp({ scopes: "read" }).send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   const nomes = r.result.tools.map((t) => t.name);
   assert.ok(nomes.includes("fabapp_read_definition"));
-  assert.ok(!nomes.includes("fabapp_write_definition"), "anunciou uma ferramenta que responderia 403");
+  assert.ok(!nomes.includes("fabapp_write_definition"), "advertised a tool that would answer 403");
   assert.ok(!nomes.includes("fabapp_deploy"));
 });
 
-test("com escrita, todas aparecem", async () => {
+test("with write, all of them show up", async () => {
   const r = await mcp().send({ jsonrpc: "2.0", id: 2, method: "tools/list" });
   assert.equal(r.result.tools.length, TOOLS.length);
 });
 
-test("toda ferramenta declara escopo, descrição e schema de entrada", () => {
-  // Uma ferramenta sem escopo cairia fora de `toolsFor` e simplesmente não existiria — falha silenciosa.
+test("every tool declares a scope, a description and an input schema", () => {
+  // A tool without a scope would fall outside `toolsFor` and simply not exist — a silent failure.
   for (const t of TOOLS) {
     assert.ok(["read", "write"].includes(t.scope), `${t.name} sem escopo válido`);
-    assert.ok(t.description.length > 40, `${t.name} com descrição curta demais para o modelo escolher`);
+    assert.ok(t.description.length > 40, `${t.name} has a description too short for the model to choose by`);
     assert.equal(t.inputSchema.type, "object", t.name);
-    assert.equal(t.inputSchema.additionalProperties, false, `${t.name} aceita argumento não declarado`);
+    assert.equal(t.inputSchema.additionalProperties, false, `${t.name} accepts an undeclared argument`);
     assert.equal(typeof t.run, "function", t.name);
   }
 });
 
-test("chamar uma ferramenta de escrita sem o escopo explica que é PERMISSÃO, não argumento", async () => {
+test("calling a write tool without the scope explains it is PERMISSION, not arguments", async () => {
   const r = await mcp({ scopes: "read" }).send({
     jsonrpc: "2.0", id: 3, method: "tools/call",
     params: { name: "fabapp_deploy", arguments: { project_id: "p", app_id: "a" } } });
   assert.equal(r.result.isError, true);
   const txt = r.result.content[0].text;
-  assert.match(txt, /escopo de escrita/);
-  assert.match(txt, /fabapp login/, "tem de dizer COMO resolver, senão o modelo reformula argumentos até desistir");
+  assert.match(txt, /needs the write scope/);
+  assert.match(txt, /fabapp login/, "it has to say HOW to fix it, or the model rewords arguments until it gives up");
 });
 
-test("ferramenta desconhecida é dita como desconhecida", async () => {
+test("an unknown tool is named as unknown", async () => {
   const r = await mcp().send({ jsonrpc: "2.0", id: 4, method: "tools/call",
                                params: { name: "fabapp_inventada", arguments: {} } });
   assert.equal(r.result.isError, true);
-  assert.match(r.result.content[0].text, /desconhecida/);
+  assert.match(r.result.content[0].text, /Unknown tool/);
 });
 
-test("falha de ferramenta vira RESULTADO com isError, não erro de protocolo", async (t) => {
-  // Assim o modelo lê a mensagem ("regra de acesso inválida em message.access") e corrige. Um erro de protocolo
-  // derruba a conexão e ele não vê nada.
+test("a tool failure becomes a RESULT with isError, not a protocol error", async (t) => {
+  // That way the model reads the message ("invalid access rule at message.access") and corrects it. A protocol
+  // error takes the connection down and it sees nothing.
   const srv = httpServer((req, res) => {
     res.writeHead(400, { "content-type": "application/json" });
     res.end(JSON.stringify({ detail: { message: "message.access: regra desconhecida 'owner_via'" } }));
@@ -94,27 +95,27 @@ test("falha de ferramenta vira RESULTADO com isError, não erro de protocolo", a
   const s = mcp({ host: `http://localhost:${srv.address().port}` });
   const r = await s.send({ jsonrpc: "2.0", id: 5, method: "tools/call",
                            params: { name: "fabapp_read_definition", arguments: { project_id: "p" } } });
-  assert.ok(!r.error, "não pode ser erro de protocolo");
+  assert.ok(!r.error, "it must not be a protocol error");
   assert.equal(r.result.isError, true);
   assert.match(r.result.content[0].text, /owner_via/);
 });
 
-test("uma notificação não recebe resposta", async () => {
+test("a notification gets no reply", async () => {
   const s = mcp();
   await s.send({ jsonrpc: "2.0", method: "notifications/initialized" });
-  assert.equal(s.out.length, 0, "responder a uma notificação quebra cliente estrito");
+  assert.equal(s.out.length, 0, "answering a notification breaks a strict client");
 });
 
-test("JSON inválido vira erro de parse, e não derruba o servidor", async () => {
+test("invalid JSON becomes a parse error, and does not take the server down", async () => {
   const s = mcp();
-  const r = await s.raw("{isto não é json");
+  const r = await s.raw("{this is not json");
   assert.equal(r.error.code, -32700);
   // E o servidor segue atendendo.
   const ok = await s.send({ jsonrpc: "2.0", id: 9, method: "tools/list" });
   assert.ok(ok.result.tools.length);
 });
 
-test("método não suportado responde, mas só quando tem id", async () => {
+test("an unsupported method answers, but only when it has an id", async () => {
   const s = mcp();
   const r = await s.send({ jsonrpc: "2.0", id: 10, method: "resources/list" });
   assert.equal(r.error.code, -32601);
@@ -123,8 +124,16 @@ test("método não suportado responde, mas só quando tem id", async () => {
   assert.equal(s.out.length, 0);
 });
 
-test("as ferramentas de leitura nunca são as de escrita", () => {
+test("initialize reports THIS version, not a hand-written copy of it", async () => {
+  // 0.1.0 stayed in `serverInfo` through the whole life of 0.1.1. The version an MCP client shows is the one a bug
+  // report names, so a stale copy points the reader at the release that never had the bug.
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const r = await mcp().send({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+  assert.equal(r.result.serverInfo.version, pkg.version);
+});
+
+test("the read tools are never the write tools", () => {
   const leitura = new Set(toolsFor("read").map((t) => t.name));
   const escrita = toolsFor("read write").filter((t) => t.scope === "write").map((t) => t.name);
-  for (const w of escrita) assert.ok(!leitura.has(w), `${w} vazou para o conjunto de leitura`);
+  for (const w of escrita) assert.ok(!leitura.has(w), `${w} leaked into the read set`);
 });

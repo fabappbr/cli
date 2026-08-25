@@ -1,71 +1,90 @@
 # @fabappai/cli
 
-A definição de um projeto Fabapp, no seu disco.
+A Fabapp project's definition, on your disk.
 
 ```bash
 npx @fabappai/cli login
 npx @fabappai/cli link <project-id>
 npx @fabappai/cli pull
-# edite os .json
+# edit the .json files
 npx @fabappai/cli push
 ```
 
-## Comandos
+## Commands
 
 | | |
 |---|---|
-| `login` | autoriza esta máquina pelo fluxo de dispositivo. `--scopes "read"` para só leitura, `--no-open` em headless/CI |
-| `logout` | esquece o token **nesta máquina**. Ele continua válido no servidor até ser revogado no Studio |
-| `status` | a que conta você está autorizado e a que projeto esta pasta está ligada |
-| `link <id>` | liga o diretório atual a um projeto. Confere o acesso **antes** de gravar |
-| `pull` | traz `fab.schema.json`, `fab.automations.json`, `fab.settings.json`, `fab.connectors.json` e `apps/<slug>/fab.config.json` |
-| `push` | envia de volta o que está no disco |
-| `deploy` | sobe o que você editou no workspace e publica. `--no-publish` só salva |
-| `dev` | roda o app na sua máquina, com o mesmo template que a plataforma usa. `--app <slug>` escolhe a surface, `--reset` refaz o workspace, `--port` muda a porta |
+| `login` | authorises this machine through the device flow. `--scopes "read"` for read-only, `--no-open` on headless/CI |
+| `logout` | forgets the token **on this machine**. It stays valid on the server until it is revoked in Studio |
+| `status` | which account you are authorised on, and which project this folder is linked to |
+| `link <id>` | links the current directory to a project. Verifies access **before** writing anything |
+| `pull` | brings down `fab.schema.json`, `fab.automations.json`, `fab.settings.json`, `fab.connectors.json` and `apps/<slug>/fab.config.json` |
+| `push` | sends back what is on disk |
+| `deploy` | uploads what you edited in the workspace and publishes. `--no-publish` only saves |
+| `dev` | runs the app on your machine, on the same template the platform uses. `--app <slug>` picks the surface, `--reset` rebuilds the workspace, `--port` changes the port |
 
-`FABAPP_API_URL` muda a base da API (padrão `https://api.fabapp.ai`).
+`FABAPP_API_URL` changes the API base (default `https://api.fabapp.ai`).
 
-## O que ele não faz, de propósito
+## What it will not do, on purpose
 
-**Não escreve por cima do que você editou.** O `dev` monta `.fabapp/workspace` uma vez; nas execuções seguintes ele **compara** a assinatura do template e avisa se divergiu, em vez de rebaixar por cima. Refazer é escolha sua (`--reset`), e ele diz que isso apaga suas edições.
+**It will not write over what you edited.** `dev` assembles `.fabapp/workspace` once; on later runs it **compares**
+the template signature and warns when it drifted, instead of overwriting. Rebuilding is your call (`--reset`), and
+it tells you that this deletes your edits.
 
-**Não apaga.** Nem no `pull`, nem no `deploy`: um arquivo que sumiu do seu workspace é **relatado**, nunca removido do app. Seu workspace pode estar velho em relação ao servidor — a IA pode ter editado o app no Studio nesse meio-tempo — e apagar lá por causa de uma ausência aqui destrói trabalho que ninguém pediu para gerenciar.
+**It will not delete.** Neither in `pull` nor in `deploy`: a file that disappeared from your workspace is
+**reported**, never removed from the app. Your workspace may be stale relative to the server — the AI may have
+edited the app in Studio meanwhile — and deleting there because of an absence here destroys work nobody asked us
+to manage.
 
-**Não empurra o que não é seu.** O `deploy` envia só o que você mudou desde que o workspace foi montado. Os 57 componentes da plataforma, o SDK e a casca ficam onde estão. E se você editar um arquivo que o app não pode reescrever, ele **diz** qual — em vez de salvar com 200 e não mudar nada.
+**It will not push what is not yours.** `deploy` sends only what you changed since the workspace was assembled. The
+platform's 57 components, the SDK and the shell stay where they are. And if you edit a file the app cannot
+overwrite, it **says which one** — instead of saving with a 200 and changing nothing.
 
-**Não escreve credencial em disco.** O token vai para o chaveiro do sistema; sem chaveiro, para um arquivo `0600` — e nesse caso ele **diz**. Uma ferramenta que cai calada para um lugar pior ensina que é sempre seguro.
+**It will not write a credential to disk.** The token goes into the system keychain; with no keychain, into a
+`0600` file — and in that case it **says so**. A tool that quietly falls back to a worse place teaches you it is
+always safe.
 
-**Não tem dependência.** Zero pacotes: ele segura uma credencial e fala com o seu backend, e todo pacote no grafo poderia alcançar os dois.
+**It has no dependency.** Zero packages: it holds a credential and talks to your backend, and every package in the
+graph could reach both.
 
-**`fab.connectors.json` e `fab.integrations.json` são só leitura.** Dizem o que o projeto tem conectado — para um agente saber que existe e quais operações chamar — e nunca a credencial. Conectar e rotacionar é na plataforma.
+**`fab.connectors.json` and `fab.integrations.json` are read-only.** They say what the project has connected — so
+an agent knows it exists and which operations to call — and never the credential. Connecting and rotating happens
+on the platform.
 
-## Servidor MCP
+## MCP server
 
 ```bash
-fabapp mcp     # JSON-RPC sobre stdio, para o Claude Code e o app de desktop
+fabapp mcp     # JSON-RPC over stdio, for Claude Code and the desktop app
 ```
 
-Ele usa a credencial que o `fabapp login` já guardou — não pede nem mostra segredo. No `~/.claude.json` ou no config do seu cliente:
+It uses the credential `fabapp login` already stored — it never asks for a secret and never shows one. In
+`~/.claude.json` or in your client's config:
 
 ```json
 { "mcpServers": { "fabapp": { "command": "npx", "args": ["-y", "@fabappai/cli", "mcp"] } } }
 ```
 
-| ferramenta | escopo |
+| tool | scope |
 |---|---|
-| `fabapp_list_projects` · `fabapp_list_apps` · `fabapp_read_definition` · `fabapp_app_status` | leitura |
-| `fabapp_write_definition` · `fabapp_deploy` | escrita |
+| `fabapp_list_projects` · `fabapp_list_apps` · `fabapp_read_definition` · `fabapp_app_status` | read |
+| `fabapp_write_definition` · `fabapp_deploy` | write |
 
-**O escopo decide a lista.** Um token concedido só-leitura não *vê* as ferramentas de escrita. Anunciar uma que vai responder 403 é pior que não anunciá-la: o modelo tenta, falha, e tenta de novo com outros argumentos — a recusa parece problema do pedido e não da permissão.
+**The scope decides the list.** A token granted read-only does not *see* the write tools. Advertising one that will
+answer 403 is worse than not advertising it: the model tries, fails, and tries again with different arguments — the
+refusal looks like a problem with the request, not the permission.
 
-`fabapp_read_definition` é a que mais importa: sem o schema, um id de modelo errado responde 404 e um campo inventado responde 422. É a primeira coisa que um agente deve chamar.
+`fabapp_read_definition` is the one that matters most: without the schema, a wrong model id answers 404 and an
+invented field answers 422. It is the first thing an agent should call.
 
-## Divergência de template
+## Template drift
 
-O template — a casca, o SDK, os componentes, o piso de dependências — é copiado pela plataforma a cada build, então uma cópia local envelhece sozinha. O modo de falha seria o pior possível para um comando chamado `dev`: funciona aqui, sai diferente em produção, e nada avisa.
+The template — the shell, the SDK, the components, the dependency floor — is copied by the platform on every build,
+so a local copy goes stale on its own. The failure mode would be the worst one possible for a command called `dev`:
+it works here, comes out different in production, and nothing warns you.
 
-Por isso o workspace guarda a assinatura do template que veio dentro dele, e todo `fabapp dev` compara com a que a plataforma usou no último build do app. Divergiu, ele diz — com os dois valores, para você decidir.
+So the workspace records the signature of the template it came from, and every `fabapp dev` compares it against the
+one the platform used on the app's last build. On a mismatch it says so — with both values, for you to decide.
 
-## Precisa do plano Builder ou superior
+## Requires the Builder plan or above
 
-Uma conta Free não autoriza o CLI.
+A Free account does not authorise the CLI.

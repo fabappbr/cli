@@ -1,10 +1,10 @@
 /**
- * O workspace local: o que veio da plataforma e o que VOCÊ mudou.
+ * The local workspace: what came from the platform, and what YOU changed.
  *
- * A distinção é o que torna o `deploy` seguro. Um workspace tem as duas metades misturadas — as suas páginas ao
- * lado dos 57 componentes da plataforma —, e enviar tudo empurraria para dentro do `App.code` arquivos que o app
- * não é dono e que a plataforma reescreve a cada build. Por isso o momento em que ele é montado grava uma
- * IMPRESSÃO de cada arquivo, e daí em diante "o que mudou" é uma pergunta com resposta exata.
+ * That distinction is what makes `deploy` safe. A workspace has both halves mixed together — your pages next to
+ * the platform's 57 components — and sending all of it would push into `App.code` files the app does not own and
+ * that the platform rewrites on every build. So the moment it is assembled records a FINGERPRINT of each file, and
+ * from then on "what changed" is a question with an exact answer.
  */
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -12,7 +12,7 @@ import { join, relative, resolve, sep } from "node:path";
 
 const STAMP = "workspace.json";
 const SKIP = new Set(["node_modules", "dist", ".git", ".vite", ".fabapp"]);
-/** Onde mora código do app. Fora disto é infraestrutura do build, e não tem por que viajar. */
+/** Where app code lives. Outside of this is build infrastructure, and has no reason to travel. */
 const ROOTS = ["src", "functions", "public"];
 
 export function stampPath(root) { return join(root, ".fabapp", STAMP); }
@@ -29,7 +29,7 @@ export function hash(content) {
   return createHash("sha1").update(content).digest("hex").slice(0, 16);
 }
 
-/** Todo arquivo de código do workspace, como caminho relativo com barras normais em qualquer sistema. */
+/** Every code file in the workspace, as a relative path with forward slashes on any system. */
 export function walkWorkspace(ws) {
   const out = [];
   const visit = (dir) => {
@@ -44,7 +44,7 @@ export function walkWorkspace(ws) {
   return out.sort();
 }
 
-/** A impressão do workspace inteiro, gravada quando ele nasce. */
+/** The fingerprint of the whole workspace, taken when it is born. */
 export function fingerprint(ws) {
   const out = {};
   for (const p of walkWorkspace(ws)) out[p] = hash(readFileSync(join(ws, p)));
@@ -52,11 +52,11 @@ export function fingerprint(ws) {
 }
 
 /**
- * O que mudou desde que o workspace foi montado.
+ * What changed since the workspace was assembled.
  *
- * `removed` é RELATADO e não aplicado, pela mesma razão do `pull`: o workspace pode estar velho em relação ao
- * servidor (a IA pode ter editado o app no Studio nesse meio-tempo), e apagar do lado de lá por causa de uma
- * ausência aqui destrói trabalho que ninguém pediu para gerenciar.
+ * `removed` is REPORTED and not applied, for the same reason as `pull`: the workspace may be stale relative to the
+ * server (the AI may have edited the app in Studio meanwhile), and deleting on that side because of an absence on
+ * this one destroys work nobody asked us to manage.
  */
 export function changes(ws, pristine) {
   const now = walkWorkspace(ws);
@@ -74,18 +74,18 @@ export function changes(ws, pristine) {
 
 
 /**
- * Um caminho vindo do SERVIDOR, resolvido dentro de `root` — ou um erro.
+ * A path coming from the SERVER, resolved inside `root` — or an error.
  *
- * `join(root, ...'../../.ssh/authorized_keys'.split('/'))` sai de `root` e escreve no diretório de outra pessoa. É
- * preciso que a API esteja comprometida, ou que `FABAPP_API_URL` aponte para um host hostil, para chegar aqui — e é
- * exatamente por isso que a checagem existe: uma ferramenta de sync que escreve fora da própria pasta não tem como
- * ser confiada quando qualquer uma dessas duas coisas acontecer.
+ * `join(root, ...'../../.ssh/authorized_keys'.split('/'))` escapes `root` and writes into somebody else's
+ * directory. It takes a compromised API, or a `FABAPP_API_URL` pointing at a hostile host, to get here — and that
+ * is exactly why the check exists: a sync tool that writes outside its own folder cannot be trusted on the day
+ * either of those two things happens.
  */
 export function safeJoin(root, relPath) {
   const target = resolve(root, ...String(relPath).split("/"));
   const base = resolve(root);
   if (target !== base && !target.startsWith(base + sep)) {
-    throw new Error(`o servidor mandou um caminho que sai do projeto: ${relPath}`);
+    throw new Error(`the server sent a path that escapes the project: ${relPath}`);
   }
   return target;
 }

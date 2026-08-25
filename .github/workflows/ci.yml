@@ -1,10 +1,10 @@
-# Gate de todo push e todo PR. Os MESMOS passos do publish, menos o publish.
+# The gate on every push and every PR. The SAME steps as publish, minus the publish.
 #
-# Uma tag é o pior momento para descobrir que um teste quebrou: a versão já foi decidida e o conserto vira uma tag
-# nova. Aqui o sinal chega no push que causou.
+# A tag is the worst moment to find out a test broke: the version has already been decided and the fix becomes a
+# new tag. Here the signal arrives on the push that caused it.
 #
-# Não há `npm ci`: este pacote tem ZERO dependências, e isso é decisão de segurança (ele guarda uma credencial e
-# fala com o backend de alguém). Se um dia aparecer um `node_modules`, este passo quebra — e é para quebrar.
+# There is no `npm ci`: this package has ZERO dependencies, and that is a security decision (it holds a credential
+# and talks to somebody's backend). If a `node_modules` ever appears, this step breaks — and it is meant to.
 name: ci
 
 on:
@@ -27,11 +27,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "24" }
-      - name: sem dependências (é o desenho, não um acaso)
+      - name: no dependencies (by design, not by accident)
         run: |
-          test ! -d node_modules || { echo "::error::apareceu um node_modules — este pacote não tem dependências"; exit 1; }
-          node -e "const d=require('./package.json'); if (d.dependencies && Object.keys(d.dependencies).length) { console.error('::error::dependências declaradas: ' + Object.keys(d.dependencies)); process.exit(1); }"
-      # ⚠️ `node src/index.mjs` é o caminho DIRETO, e foi ele que deixou a 0.1.0 sair quebrada: o npm publica o `bin`
-      # como symlink, e o guarda de módulo principal não casava por ele — o comando saía 0 sem imprimir nada. Rodar
-      # o arquivo não é rodar o artefato. Os testes abaixo empacotam, instalam e chamam pelo binário.
+          test ! -d node_modules || { echo "::error::a node_modules appeared — this package has no dependencies"; exit 1; }
+          node -e "const d=require('./package.json'); if (d.dependencies && Object.keys(d.dependencies).length) { console.error('::error::declared dependencies: ' + Object.keys(d.dependencies)); process.exit(1); }"
+      # ⚠️ `node src/index.mjs` is the DIRECT path, and it is what let 0.1.0 ship broken: npm publishes the `bin` as
+      # a symlink, and the main-module guard did not match through it — the command exited 0 printing nothing.
+      # Running the file is not running the artifact. The tests below pack, install and call through the binary.
       - run: node --test test/*.test.mjs

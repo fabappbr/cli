@@ -1,24 +1,24 @@
 /**
- * O que um agente pode fazer com um projeto Fabapp.
+ * What an agent can do with a Fabapp project.
  *
- * As ferramentas são declaradas aqui, separadas do transporte, porque o transporte vai mudar: hoje é stdio (o
- * Claude Code sobe o processo), e o diretório de conectores exige HTTP com OAuth. A implementação de cada
- * ferramenta é a mesma nos dois — o que muda é quem entrega a mensagem.
+ * The tools are declared here, apart from the transport, because the transport is going to change: today it is
+ * stdio (Claude Code starts the process), and the connector directory requires HTTP with OAuth. Each tool's
+ * implementation is the same on both — what changes is who delivers the message.
  *
- * ⚠️ O ESCOPO DECIDE A LISTA. Um token concedido só-leitura não vê as ferramentas de escrita: `tools/list` devolve
- * apenas o que aquele token consegue usar. Anunciar uma ferramenta que vai responder 403 é pior do que não
- * anunciá-la — o modelo tenta, falha, e tenta de novo com outros argumentos, porque a recusa parece problema do
- * pedido e não da permissão.
+ * ⚠️ THE SCOPE DECIDES THE LIST. A token granted read-only never sees the write tools: `tools/list` returns only
+ * what that token can actually use. Advertising a tool that will answer 403 is worse than not advertising it — the
+ * model tries, fails, and tries again with different arguments, because the refusal looks like a problem with the
+ * request rather than with the permission.
  */
 import { request } from "../api.mjs";
 
-/** `scope` é "read" ou "write": o mínimo que a ferramenta exige. */
+/** `scope` is "read" or "write": the least the tool requires. */
 export const TOOLS = [
   {
     name: "fabapp_list_projects",
     scope: "read",
-    description: "Lista os projetos da conta autorizada. Um projeto é o backend compartilhado: schema, registros, "
-      + "papéis, usuários finais e integrações.",
+    description: "Lists the projects of the authorised account. A project is the shared backend: schema, records, "
+      + "roles, end users and integrations.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     run: async ({ host, token, creds }) =>
       request(host, `/projects?account_id=${encodeURIComponent(creds.account_id)}`, { token }),
@@ -26,11 +26,11 @@ export const TOOLS = [
   {
     name: "fabapp_list_apps",
     scope: "read",
-    description: "Lista as surfaces (frontends) de um projeto. Cada uma tem domínio, tema e papéis próprios sobre "
-      + "o MESMO backend.",
+    description: "Lists the surfaces (frontends) of a project. Each one has its own domain, theme and roles over "
+      + "the SAME backend.",
     inputSchema: {
       type: "object",
-      properties: { project_id: { type: "string", description: "o id do projeto" } },
+      properties: { project_id: { type: "string", description: "the project id" } },
       required: ["project_id"], additionalProperties: false,
     },
     run: ({ host, token }, { project_id }) =>
@@ -39,10 +39,10 @@ export const TOOLS = [
   {
     name: "fabapp_read_definition",
     scope: "read",
-    description: "A definição do projeto como arquivos: fab.schema.json (modelos, campos e REGRAS DE ACESSO), "
-      + "fab.automations.json, fab.settings.json, fab.connectors.json e apps/<slug>/fab.config.json. "
-      + "Leia isto ANTES de escrever qualquer código contra o projeto: sem o schema, um id de modelo errado "
-      + "responde 404 e um campo inventado responde 422.",
+    description: "The project definition as files: fab.schema.json (models, fields and ACCESS RULES), "
+      + "fab.automations.json, fab.settings.json, fab.connectors.json and apps/<slug>/fab.config.json. "
+      + "Read this BEFORE writing any code against the project: without the schema, a wrong model id answers "
+      + "404 and an invented field answers 422.",
     inputSchema: {
       type: "object",
       properties: { project_id: { type: "string" } },
@@ -54,16 +54,16 @@ export const TOOLS = [
   {
     name: "fabapp_write_definition",
     scope: "write",
-    description: "Aplica fab.schema.json / fab.automations.json / fab.settings.json / apps/<slug>/fab.config.json. "
-      + "Passa pela MESMA porta que o Studio usa: regra de acesso inválida é recusada com o caminho exato, e "
-      + "nada é consertado por adivinhação. fab.connectors.json e fab.integrations.json são só leitura.",
+    description: "Applies fab.schema.json / fab.automations.json / fab.settings.json / apps/<slug>/fab.config.json. "
+      + "It goes through the SAME door the Studio uses: an invalid access rule is refused with the exact path, and "
+      + "nothing is fixed by guessing. fab.connectors.json and fab.integrations.json are read-only.",
     inputSchema: {
       type: "object",
       properties: {
         project_id: { type: "string" },
         files: {
           type: "array",
-          description: "os arquivos a aplicar, cada um { path, content }",
+          description: "the files to apply, each one { path, content }",
           items: {
             type: "object",
             properties: { path: { type: "string" }, content: { type: "string" } },
@@ -80,8 +80,8 @@ export const TOOLS = [
   {
     name: "fabapp_app_status",
     scope: "read",
-    description: "O estado de uma surface: publicada ou não, a URL no ar, quando foi o último deploy e com qual "
-      + "metade de plataforma (template_sig) ela foi buildada.",
+    description: "The state of a surface: published or not, the live URL, when the last deploy happened and which "
+      + "platform half (template_sig) it was built with.",
     inputSchema: {
       type: "object",
       properties: { project_id: { type: "string" }, app_id: { type: "string" } },
@@ -99,9 +99,9 @@ export const TOOLS = [
   {
     name: "fabapp_deploy",
     scope: "write",
-    description: "Publica uma surface: o que está salvo no projeto vai para o ar. NÃO envia código local — para "
-      + "isso use o comando `fabapp deploy`. Uma conta tem no máximo 2 builds simultâneos; o excedente recebe "
-      + "'account_builds_busy' e deve tentar de novo, não é erro.",
+    description: "Publishes a surface: whatever is saved in the project goes live. It does NOT upload local code — "
+      + "use the `fabapp deploy` command for that. An account has at most 2 concurrent builds; anything beyond that "
+      + "gets 'account_builds_busy' and should be retried, it is not an error.",
     inputSchema: {
       type: "object",
       properties: { project_id: { type: "string" }, app_id: { type: "string" } },
@@ -116,7 +116,7 @@ export const TOOLS = [
   },
 ];
 
-/** As ferramentas que ESTE token consegue usar. Ver a nota no topo. */
+/** The tools THIS token can use. See the note at the top. */
 export function toolsFor(scopes) {
   const granted = new Set((scopes || "read").split(/[\s,]+/).filter(Boolean));
   return TOOLS.filter((t) => granted.has(t.scope));

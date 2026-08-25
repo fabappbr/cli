@@ -58,7 +58,7 @@ test("link verifies access BEFORE writing anything to disk", async (t) => {
   const s = await server(t, () => ({ status: 403, body: { detail: "sem acesso a esta conta" } }));
   const root = dir();
   await assert.rejects(() => link({ host: s.host, token: "t", projectId: "p1", root, log: quiet }),
-                       /não encontrado, ou esta conta não tem acesso/);
+                       /not found, or this account has no access/);
   assert.equal(existsSync(join(root, ".fabapp", "config.json")), false, "left a link behind after failing");
 });
 
@@ -67,7 +67,7 @@ test("link says the same thing for 'not yours' and 'does not exist'", async (t) 
     const s = await server(t, () => ({ status, body: { detail: "x" } }));
     const root = dir();
     const err = await link({ host: s.host, token: "t", projectId: "p1", root, log: quiet }).catch((e) => e);
-    assert.match(err.message, /não encontrado, ou esta conta não tem acesso/);
+    assert.match(err.message, /not found, or this account has no access/);
   }
 });
 
@@ -139,7 +139,7 @@ test("push carries the token, and refuses when there is nothing to send", async 
   const root = dir();
   write(root, { host: s.host, project_id: "p1" });
   await assert.rejects(() => push({ host: s.host, token: "t", projectId: "p1", root, log: quiet }),
-                       /rode `fabapp pull` primeiro/);
+                       /run `fabapp pull` first/);
 
   writeFileSync(join(root, "fab.schema.json"), "{}\n");
   await push({ host: s.host, token: "tok-123", projectId: "p1", root, log: quiet });
@@ -189,7 +189,7 @@ test("a host that is not there says so, instead of throwing a TypeError", async 
   const err = await request("http://127.0.0.1:1", "/x").catch((e) => e);
   assert.ok(err instanceof ApiError);
   assert.equal(err.status, 0);
-  assert.match(err.message, /não consegui falar com/);
+  assert.match(err.message, /could not reach/);
 });
 
 // ---- dev ---------------------------------------------------------------------------------------------------------
@@ -216,7 +216,7 @@ test("dev refuses to guess which surface to run when there is more than one", as
   write(root, { host: s.host, project_id: "p1" });
   await assert.rejects(() => dev({ host: s.host, token: "t", projectId: "p1", root, log: quiet,
                                    install: () => {}, run: () => 0 }),
-                       /escolha com --app/);
+                       /pick one with --app/);
 });
 
 test("dev names the surfaces it knows when the one asked for is not there", async (t) => {
@@ -225,7 +225,7 @@ test("dev names the surfaces it knows when the one asked for is not there", asyn
   write(root, { host: s.host, project_id: "p1" });
   await assert.rejects(() => dev({ host: s.host, token: "t", projectId: "p1", root, app: "inexistente",
                                    log: quiet, install: () => {}, run: () => 0 }),
-                       /não achei a surface 'inexistente'.*loja/);
+                       /no surface named 'inexistente'.*loja/);
 });
 
 test("dev does NOT touch an existing workspace, even when the template moved on", async (t) => {
@@ -242,7 +242,7 @@ test("dev does NOT touch an existing workspace, even when the template moved on"
 
   assert.equal(readFileSync(join(ws, "src", "pages", "Home.tsx"), "utf8"), "// O QUE A PESSOA EDITOU");
   const said = lines.join("\n");
-  assert.match(said, /template mudou/);
+  assert.match(said, /template changed/);
   assert.match(said, /tpl-VELHO/);
   assert.match(said, /tpl-aaaa/);
   assert.match(said, /--reset/);
@@ -259,7 +259,7 @@ test("dev stays quiet when the template matches", async (t) => {
   const lines = [];
   await dev({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l),
               install: () => {}, run: () => 0 });
-  assert.doesNotMatch(lines.join("\n"), /template mudou/);
+  assert.doesNotMatch(lines.join("\n"), /template changed/);
 });
 
 test("dev warns when the workspace cannot say where it came from", async (t) => {
@@ -273,7 +273,7 @@ test("dev warns when the workspace cannot say where it came from", async (t) => 
   const lines = [];
   await dev({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l),
               install: () => {}, run: () => 0 });
-  assert.match(lines.join("\n"), /não registra de qual template veio/);
+  assert.match(lines.join("\n"), /does not record which template it came from/);
 });
 
 test("dev installs only when node_modules is missing, and always runs", async (t) => {
@@ -375,7 +375,7 @@ test("a file you deleted is reported, and saves nothing when it is the only diff
 
   const lines = [];
   await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
-  assert.match(lines.join("\n"), /NÃO os apaguei/);
+  assert.match(lines.join("\n"), /did NOT delete them/);
   assert.equal(s.calls.filter((c) => c.method === "PUT").length, 0);
 });
 
@@ -409,7 +409,7 @@ test("deploy says which edits the platform refused to keep", async (t) => {
 
   const lines = [];
   await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
-  assert.match(lines.join("\n"), /não pode reescrevê-los/);
+  assert.match(lines.join("\n"), /cannot overwrite them/);
   assert.match(lines.join("\n"), /fab-client\.tsx/);
 });
 
@@ -440,7 +440,7 @@ test("deploy warns when what went live was built on a different template", async
   const lines = [];
   await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l) });
   assert.match(lines.join("\n"), /tpl-OUTRO/);
-  assert.match(lines.join("\n"), /pode diferir do que está no ar/);
+  assert.match(lines.join("\n"), /may differ from what is live/);
 });
 
 test("deploy refuses a workspace an older CLI left without a fingerprint", async (t) => {
@@ -449,7 +449,7 @@ test("deploy refuses a workspace an older CLI left without a fingerprint", async
   const ws = stampedWorkspace(root, s.host);
   writeStamp(root, { app_id: "a1", template: "tpl-aaaa" });      // no `files`
   await assert.rejects(() => deploy({ host: s.host, token: "t", projectId: "p1", root, log: quiet }),
-                       /não registra o que veio da plataforma/);
+                       /does not record what came from/);
 });
 
 test("changes() tells apart edited, new and removed", () => {
@@ -476,7 +476,7 @@ test("a path from the server that escapes the project is refused", async (t) => 
   assert.equal(safeJoin(root, "apps/loja/fab.config.json"), join(root, "apps", "loja", "fab.config.json"));
   assert.equal(safeJoin(root, "/etc/passwd"), join(root, "etc", "passwd"));   // an absolute path stays inside
   for (const bad of ["../../.ssh/authorized_keys", "a/../../b", "../fora.json"]) {
-    assert.throws(() => safeJoin(root, bad), /sai do projeto/, bad);
+    assert.throws(() => safeJoin(root, bad), /escapes the project/, bad);
   }
 });
 
@@ -485,6 +485,6 @@ test("pull refuses to write a file the server placed outside the project", async
   const root = dir();
   write(root, { host: s.host, project_id: "p1" });
   await assert.rejects(() => pull({ host: s.host, token: "t", projectId: "p1", root, log: quiet }),
-                       /sai do projeto/);
+                       /escapes the project/);
   assert.equal(existsSync(join(root, "..", "ESCAPOU.json")), false);
 });
