@@ -5,6 +5,9 @@
  * Zero dependencies, on purpose. This is a tool that holds a credential and talks to somebody's backend; every
  * package in its graph would be a package that could reach both.
  */
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
 import { findRoot, read } from "./config.mjs";
 import { clear, load } from "./credentials.mjs";
 import { serve as serveMcp } from "./mcp/server.mjs";
@@ -115,7 +118,27 @@ export async function main(argv = process.argv.slice(2)) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * "Fui executado, ou fui importado?"
+ *
+ * ⚠️ A comparação ingênua — `import.meta.url === \`file://${process.argv[1]}\`` — está ERRADA para um pacote
+ * instalado, e do jeito mais silencioso possível. O npm publica o `bin` como um SYMLINK
+ * (`node_modules/.bin/fabapp -> ../@fabappai/cli/src/index.mjs`), então `process.argv[1]` é o caminho do LINK
+ * enquanto `import.meta.url` é o do arquivo real. Eles nunca batem, `main()` nunca roda, e o comando sai com
+ * código 0 sem imprimir nada — parece que funcionou e não fez coisa alguma.
+ *
+ * Isso passou por todo o meu teste porque eu rodava `node src/index.mjs`, o caminho DIRETO, onde a comparação dá
+ * certo. Testei o arquivo, não o artefato. `realpathSync` resolve o link antes de comparar, e há um teste que
+ * instala o tarball de verdade e chama o binário pelo symlink.
+ */
+function fuiExecutadoDiretamente() {
+  const invocado = process.argv[1];
+  if (!invocado) return false;
+  try { return import.meta.url === pathToFileURL(realpathSync(invocado)).href; }
+  catch { return false; }
+}
+
+if (fuiExecutadoDiretamente()) {
   main().then((code) => process.exit(code ?? 0)).catch((e) => {
     console.error(`\n  ✗ ${e.message}\n`);
     process.exit(1);

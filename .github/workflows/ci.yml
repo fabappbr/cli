@@ -31,6 +31,7 @@ jobs:
         run: |
           test ! -d node_modules || { echo "::error::apareceu um node_modules — este pacote não tem dependências"; exit 1; }
           node -e "const d=require('./package.json'); if (d.dependencies && Object.keys(d.dependencies).length) { console.error('::error::dependências declaradas: ' + Object.keys(d.dependencies)); process.exit(1); }"
+      # ⚠️ `node src/index.mjs` é o caminho DIRETO, e foi ele que deixou a 0.1.0 sair quebrada: o npm publica o `bin`
+      # como symlink, e o guarda de módulo principal não casava por ele — o comando saía 0 sem imprimir nada. Rodar
+      # o arquivo não é rodar o artefato. Os testes abaixo empacotam, instalam e chamam pelo binário.
       - run: node --test test/*.test.mjs
-      - name: o binário sobe e responde
-        run: node src/index.mjs help | grep -q "fabapp login"

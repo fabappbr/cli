@@ -45,9 +45,9 @@ jobs:
           pkg="$(node -p "require('./package.json').version")"
           test "$tag" = "$pkg" || { echo "::error::tag $tag ≠ package.json $pkg"; exit 1; }
 
+      # Inclui os testes que EMPACOTAM e INSTALAM o pacote e chamam o binário pelo symlink — a 0.1.0 saiu quebrada
+      # justamente porque a verificação era `node src/index.mjs`, que é o arquivo e não o artefato.
       - run: node --test test/*.test.mjs
-      - name: o binário sobe e responde
-        run: node src/index.mjs help | grep -q "fabapp login"
 
       # O que vai para o registro lido do TARBALL de verdade, atrás do que não pode sair de casa.
       - name: o tarball não leva rota interna nem chave
