@@ -11,11 +11,16 @@ possible way to fail: it looks like it worked.
 The whole suite passed because it ran `node src/index.mjs`, the DIRECT path, where the comparison holds. Testing
 the file is not testing the artifact.
 
-⚠️ **This version was published BY HAND, so it carries no provenance attestation.** The OIDC pipeline is in
-place and signs correctly, but npm answers `404 PUT` to it for this package — the Trusted Publisher binding on
-`@fabappai/cli` is not yet recognised, while the identical setup on `@fabappai/sdk` works. Publishing by hand was
-the trade: 0.1.0 was live and broken, and every `npx @fabappai/cli` was failing silently. The tarball is byte-identical
-to the one CI built (shasum `6184fbfb1ea3025755de7491c9fb0e54f6305661`). The next release goes through the pipeline.
+⚠️ **This version was published BY HAND, so it carries no provenance attestation.** Publishing by hand was the
+trade: 0.1.0 was live and broken, and every `npx @fabappai/cli` was failing silently while the pipeline was stuck.
+
+The pipeline was stuck on a one-word mismatch worth writing down, because the error names neither field. The
+Trusted Publisher entry for this package had its **GitHub organisation set to `fabappai`** — which is the *npm*
+scope — while the repository lives at `fabappbr/cli`. Actions signs a claim saying `fabappbr/cli`, npm compares it
+against `fabappai/cli`, and an identity it does not recognise is refused as **`404 Not Found - PUT`**, not as a 403.
+So it reads exactly like "this package does not exist", which sends you looking at the package, the scope and the
+token — everywhere except the one field that is wrong. The two orgs being near-homographs is what made it survive
+three attempts. Corrected to `fabappbr`; the next release goes through the pipeline and carries provenance again.
 
 The guard now resolves the symlink with `realpathSync`, and there are three tests that **pack, install and call the
 binary** — what a user does. Mutation-verified: I reintroduced 0.1.0's exact defect and all three failed. CI and
