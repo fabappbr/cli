@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "fabapp": "./src/index.mjs"
+    "fabapp": "src/index.mjs"
   },
   "files": [
     "src",
