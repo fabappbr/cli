@@ -38,9 +38,28 @@ function content(value, isError = false) {
            isError };
 }
 
+/**
+ * Tools that may not run before the agent has the contract in front of it.
+ *
+ * `fabapp_write_definition` is the one, and the line is drawn at what its INPUT encodes: a schema names field types
+ * from a closed list and access rules that are the only gate on an app's data. Guessing either produces something
+ * the server refuses, or — worse for the access rules, which fail closed — an app where nobody can read their own
+ * records. Neither is recoverable by the agent reading the error, because the error names one mistake and the
+ * contract has a shape.
+ *
+ * Deploy and create are NOT gated. Publishing code that already exists, or making an empty project, encodes no part
+ * of the contract, and a gate there would be friction bought with nothing.
+ */
+const NEEDS_DOCS = new Set(["fabapp_write_definition"]);
+
 export function createServer({ host, creds, write, exit = () => {} }) {
   const scopes = creds?.scope || "read";
   const token = creds?.token;
+  // The `instructions` ASK the agent to read the docs first, and an ask is not a guarantee — a model is free to
+  // skip it. This is the guarantee: the text has to have entered the conversation before a schema can be written.
+  // It does not check that the agent UNDERSTOOD anything; it checks that the contract is in its context, which is
+  // the most a server can enforce and the thing that was missing.
+  let docsRead = false;
 
   const handlers = {
     initialize(params) {
@@ -78,8 +97,17 @@ export function createServer({ host, creds, write, exit = () => {} }) {
             + "Authorise again with `fabapp login --scopes \"read write\"`."
           : `Unknown tool: ${params?.name}`, true);
       }
+      if (NEEDS_DOCS.has(tool.name) && !docsRead) {
+        return content(
+          `Call \`fabapp_docs\` first, then this again. ${tool.name} writes the project's definition, and both `
+          + "halves of it are a closed contract: the field types are a fixed list (anything else is refused) and "
+          + "the access rules are the only thing deciding who can read this app's data — a wrong one locks every "
+          + "user out of their own records rather than failing loudly.", true);
+      }
       try {
-        return content(await tool.run({ host, token, creds }, params?.arguments || {}));
+        const out = await tool.run({ host, token, creds }, params?.arguments || {});
+        if (tool.name === "fabapp_docs") docsRead = true;
+        return content(out);
       } catch (e) {
         // A tool failure becomes a RESULT with isError, not a protocol error: that way the model reads the
         // message ("invalid access rule at message.access") and corrects it, instead of watching the link die.

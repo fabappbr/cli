@@ -98,7 +98,16 @@ export const TOOLS = [
     scope: "write",
     description: "Applies fab.schema.json / fab.automations.json / fab.settings.json / apps/<slug>/fab.config.json. "
       + "It goes through the SAME door the Studio uses: an invalid access rule is refused with the exact path, and "
-      + "nothing is fixed by guessing. fab.connectors.json and fab.integrations.json are read-only.",
+      + "nothing is fixed by guessing. fab.connectors.json and fab.integrations.json are read-only.\n"
+      // Repeated HERE, and not only in the docs, because a tool description is the one text every MCP client puts
+      // in front of the model — it is read even by an agent that skipped everything else. The docs carry the whole
+      // contract; these two lines carry the part that is most often guessed wrong.
+      + "FIELD TYPES are a CLOSED list — anything else is refused: text, richtext, number, money, boolean, date, "
+      + "datetime, time, image, file, video, audio, url, email, phone, color, icon, enum (with options), ref (with "
+      + "to), list, geo, json, autonumber. There is no 'select' (use enum), no 'longtext' (use richtext), no "
+      + "'relation' (use ref).\n"
+      + "ACCESS defaults are CLOSED: with no rule, read is 'authenticated' and never public. Call fabapp_docs for "
+      + "the full grammar (owner_field, owner_in, owner_via, any, all, role:, plan:).",
     inputSchema: {
       type: "object",
       properties: {

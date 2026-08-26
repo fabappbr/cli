@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.4
+
+**The docs stop being a suggestion.** 0.1.3 added `fabapp_docs` and asked the agent, in the MCP `instructions`, to
+call it first. An instruction is something a model is free to skip, and the cost of skipping this one is a schema
+with an invented field type, or access rules that lock every user out of their own records — which fails closed and
+silently rather than loudly.
+
+`fabapp_write_definition` now REFUSES until `fabapp_docs` has been called in the session. It does not check that the
+agent understood anything; it checks that the contract entered its context before it wrote a schema, which is the
+most a server can enforce and the thing that was missing.
+
+Only that tool is gated. Reading, deploying and creating a project encode no part of the contract, and a gate there
+would be friction bought with nothing.
+
+**And the closed field-type list now travels in the tool description itself.** A tool description is the one text
+every MCP client puts in front of the model — read even by an agent that skipped the docs and the instructions — so
+the part that is most often guessed wrong (`select` is not a type; `enum` is) belongs there too.
+
 ## 0.1.3
 
 **`fabapp_docs`** — the platform's own contract, as an MCP tool, and the opening now tells the agent to read it first.

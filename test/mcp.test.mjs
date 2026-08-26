@@ -158,6 +158,55 @@ test("fabapp_docs returns the platform's own contract, live", async (t) => {
   assert.match(r.result.content[0].text, /COMPLETE list/);
 });
 
+test("writing a definition is REFUSED until the contract has been read", async (t) => {
+  // The `instructions` ask; this enforces. A model is free to skip an instruction, and the cost of skipping this one
+  // is a schema with an invented field type, or access rules that lock every user out of their own records.
+  const srv = httpServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("### Field types (this is the COMPLETE list)");
+  });
+  await new Promise((r) => srv.listen(0, r));
+  t.after(() => srv.close());
+  const s = mcp({ host: `http://localhost:${srv.address().port}` });
+
+  const blocked = await s.send({ jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name: "fabapp_write_definition", arguments: { project_id: "p", files: [] } } });
+  assert.equal(blocked.result.isError, true);
+  assert.match(blocked.result.content[0].text, /fabapp_docs/);
+  // The refusal SAYS what to do and why — an agent that only reads the error still learns the shape of the problem.
+  assert.match(blocked.result.content[0].text, /closed contract|field types/i);
+
+  await s.send({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "fabapp_docs", arguments: {} } });
+  const after = await s.send({ jsonrpc: "2.0", id: 3, method: "tools/call",
+    params: { name: "fabapp_write_definition", arguments: { project_id: "p", files: [] } } });
+  // It reaches the API now (which this fake answers as docs text) — the point is only that the gate is open.
+  assert.doesNotMatch(String(after.result.content[0].text), /Call `fabapp_docs` first/);
+});
+
+test("reading, deploying and creating are NOT gated", async (t) => {
+  // The gate is bought with friction, so it is spent only where the INPUT encodes the contract. Publishing code that
+  // already exists, or making an empty project, encodes none of it.
+  const srv = httpServer((req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end("[]"); });
+  await new Promise((r) => srv.listen(0, r));
+  t.after(() => srv.close());
+  const s = mcp({ host: `http://localhost:${srv.address().port}` });
+
+  for (const name of ["fabapp_list_projects", "fabapp_read_definition"]) {
+    const r = await s.send({ jsonrpc: "2.0", id: 1, method: "tools/call",
+      params: { name, arguments: { project_id: "p" } } });
+    assert.doesNotMatch(String(r.result.content[0].text), /Call `fabapp_docs` first/, name);
+  }
+});
+
+test("the closed field list travels in the tool description itself", () => {
+  // A tool description is the one text every MCP client puts in front of the model, read even by an agent that
+  // skipped the docs and the instructions. The part most often guessed wrong belongs there too.
+  const d = TOOLS.find((t) => t.name === "fabapp_write_definition").description;
+  assert.match(d, /CLOSED list/);
+  assert.match(d, /no 'select' \(use enum\)/);
+  assert.match(d, /autonumber/);
+});
+
 test("the read tools are never the write tools", () => {
   const leitura = new Set(toolsFor("read").map((t) => t.name));
   const escrita = toolsFor("read write").filter((t) => t.scope === "write").map((t) => t.name);
