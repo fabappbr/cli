@@ -15,6 +15,24 @@ import { request } from "../api.mjs";
 /** `scope` is "read" or "write": the least the tool requires. */
 export const TOOLS = [
   {
+    name: "fabapp_docs",
+    scope: "read",
+    description: "The platform's contract: the COMPLETE list of field types, the access-rule grammar, how a project "
+      + "is laid out, and the SDK surface an app imports. READ THIS FIRST, before writing a schema or any code — "
+      + "the field types are a closed list and a type that is not on it is refused, and the access rules are the "
+      + "only thing standing between an app's data and the public.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    run: async ({ host }) => {
+      // Fetched LIVE from the same host the tools already talk to, rather than shipped as a copy in this package.
+      // A copy would be a second source for a contract that changes — the schema gains a field type, a rule gains a
+      // form — and an agent reading a stale copy writes a schema the server then refuses, which is a worse failure
+      // than not having the docs at all: it looks like the platform is broken.
+      const res = await fetch(`${host.replace(/\/$/, "")}/llms-full.txt`);
+      if (!res.ok) throw new Error(`the docs are not reachable (${res.status})`);
+      return await res.text();
+    },
+  },
+  {
     name: "fabapp_list_projects",
     scope: "read",
     description: "Lists the projects of the authorised account. A project is the shared backend: schema, records, "

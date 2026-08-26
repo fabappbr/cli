@@ -51,7 +51,14 @@ export function createServer({ host, creds, write, exit = () => {} }) {
         serverInfo: { name: "fabapp", version: VERSION },
         // Said at the opening because it decides what the model can plan: with a read-only token half the tools
         // do not exist, and it is better it knows that before assembling a plan that cannot run.
+        //
+        // And it points at `fabapp_docs` in the same breath. An agent arriving here knows nothing about this
+        // platform — not the field types, which are a closed list, not the access grammar, which is the only thing
+        // between an app's data and the public. Everything it needs is published, but nothing was telling it so,
+        // and an agent that guesses writes a schema the server refuses and reads that as the platform being broken.
         instructions: `Account ${creds?.account_id || "?"} · scope: ${scopes}.`
+          + " Call `fabapp_docs` FIRST: the field types are a closed list and the access rules decide who can read"
+          + " an app's data. Then `fabapp_read_definition` for the project you are working on."
           + (scopes.includes("write") ? "" : " Read-only: no write tool is available."),
       };
     },

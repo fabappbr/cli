@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.3
+
+**`fabapp_docs`** — the platform's own contract, as an MCP tool, and the opening now tells the agent to read it first.
+
+An agent arriving through this server knew nothing about the platform it had just been given write access to. It got
+`Account <id> · scope: read write` and seven tool descriptions: no field types (a closed list — anything else is
+refused), no access grammar (the only gate on an app's data), no project layout. The documentation was published and
+good; nothing pointed at it, so the agent had to already know it existed.
+
+It is fetched LIVE from the host rather than shipped as a copy in this package. A copy goes stale against a contract
+that changes, and an agent reading a stale copy writes a schema the server then refuses — which reads as the platform
+being broken rather than as the docs being old.
+
+Requires a control-plane from 2026-08-26 or later, where the docs also gained the access grammar in full
+(`owner_field`, `owner_in`, `owner_via`, the closed defaults). Before that the tool works but the corpus it returns
+describes ownership in three sentences.
+
 ## 0.1.2
 
 **`fabapp create "<name>"`** — a project and its first surface, without a browser.

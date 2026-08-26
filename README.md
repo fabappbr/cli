@@ -67,6 +67,7 @@ It uses the credential `fabapp login` already stored — it never asks for a sec
 
 | tool | scope |
 |---|---|
+| `fabapp_docs` — **read this first** | read |
 | `fabapp_list_projects` · `fabapp_list_apps` · `fabapp_read_definition` · `fabapp_app_status` | read |
 | `fabapp_create_project` · `fabapp_write_definition` · `fabapp_deploy` | write |
 

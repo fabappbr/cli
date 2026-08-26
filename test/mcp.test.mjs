@@ -132,6 +132,32 @@ test("initialize reports THIS version, not a hand-written copy of it", async () 
   assert.equal(r.result.serverInfo.version, pkg.version);
 });
 
+test("the opening tells an agent where the contract is", async () => {
+  // An agent arriving here knows nothing about this platform, and everything it needs is published — but nothing
+  // was pointing at it. The `instructions` field is the one thing every MCP client feeds to the model before it
+  // plans anything, so it is where the pointer has to be.
+  const r = await mcp().send({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} });
+  assert.match(r.result.instructions, /fabapp_docs/);
+  assert.match(r.result.instructions, /field types|access rules/);
+});
+
+test("fabapp_docs returns the platform's own contract, live", async (t) => {
+  // Fetched from the host, never a copy in this package: a stale copy makes an agent write a schema the server
+  // then refuses, which reads as the platform being broken rather than as the docs being old.
+  const srv = httpServer((req, res) => {
+    assert.equal(req.url, "/llms-full.txt");
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("### Field types (this is the COMPLETE list)\n`text` `enum` `ref`");
+  });
+  await new Promise((r) => srv.listen(0, r));
+  t.after(() => srv.close());
+
+  const s = mcp({ host: `http://localhost:${srv.address().port}` });
+  const r = await s.send({ jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "fabapp_docs", arguments: {} } });
+  assert.equal(r.result.isError ?? false, false);
+  assert.match(r.result.content[0].text, /COMPLETE list/);
+});
+
 test("the read tools are never the write tools", () => {
   const leitura = new Set(toolsFor("read").map((t) => t.name));
   const escrita = toolsFor("read write").filter((t) => t.scope === "write").map((t) => t.name);
