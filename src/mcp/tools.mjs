@@ -24,6 +24,30 @@ export const TOOLS = [
       request(host, `/projects?account_id=${encodeURIComponent(creds.account_id)}`, { token }),
   },
   {
+    name: "fabapp_create_project",
+    scope: "write",
+    description: "Creates a project and its first surface, so an agent can START an app instead of only editing one "
+      + "a person created for it. Returns the project id and the app id — feed them to the other tools. The project "
+      + "is born with an EMPTY schema: call fabapp_write_definition next to give it models.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "the project name" },
+        app_name: { type: "string", description: "the first surface's name (defaults to the project name)" },
+      },
+      required: ["name"], additionalProperties: false,
+    },
+    run: async ({ host, token, creds }, { name, app_name }) => {
+      const project = await request(host, "/projects", {
+        method: "POST", token, body: { account_id: creds.account_id, name, schema: { models: [] } },
+      });
+      const app = await request(host, `/projects/${encodeURIComponent(project.id)}/apps`, {
+        method: "POST", token, body: { name: app_name || name },
+      });
+      return { project_id: project.id, app_id: app.id, slug: app.slug };
+    },
+  },
+  {
     name: "fabapp_list_apps",
     scope: "read",
     description: "Lists the surfaces (frontends) of a project. Each one has its own domain, theme and roles over "

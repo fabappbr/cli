@@ -14,6 +14,7 @@ npx @fabappai/cli push
 
 | | |
 |---|---|
+| `create "<name>"` | creates a project and its first surface, and links this directory. `--app <name>` names the surface separately |
 | `login` | authorises this machine through the device flow. `--scopes "read"` for read-only, `--no-open` on headless/CI |
 | `logout` | forgets the token **on this machine**. It stays valid on the server until it is revoked in Studio |
 | `status` | which account you are authorised on, and which project this folder is linked to |
@@ -67,7 +68,7 @@ It uses the credential `fabapp login` already stored — it never asks for a sec
 | tool | scope |
 |---|---|
 | `fabapp_list_projects` · `fabapp_list_apps` · `fabapp_read_definition` · `fabapp_app_status` | read |
-| `fabapp_write_definition` · `fabapp_deploy` | write |
+| `fabapp_create_project` · `fabapp_write_definition` · `fabapp_deploy` | write |
 
 **The scope decides the list.** A token granted read-only does not *see* the write tools. Advertising one that will
 answer 403 is worse than not advertising it: the model tries, fails, and tries again with different arguments — the

@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 
 import { findRoot, read } from "./config.mjs";
 import { clear, load } from "./credentials.mjs";
+import { create } from "./commands/create.mjs";
 import { deploy } from "./commands/deploy.mjs";
 import { dev } from "./commands/dev.mjs";
 import { link } from "./commands/link.mjs";
@@ -27,6 +28,7 @@ const USAGE = `
                  [--no-open]               do not open the browser (headless / CI)
     fabapp logout                          forget the token on THIS machine
     fabapp status                          which account you are on, and which project this folder belongs to
+    fabapp create "<name>" [--app <name>]  create a project and its first surface, and link this directory
     fabapp link <project-id>               point this directory at a project
     fabapp dev [--app <slug>] [--reset]    run the app locally, on the platform's own template
     fabapp pull                            bring the project's definition to disk
@@ -76,6 +78,20 @@ export async function main(argv = process.argv.slice(2)) {
       log(`  host       ${config?.host || host}`);
       log(`  session    ${creds ? `account ${creds.account_id} · scope ${creds.scope}` : "not authorised"}`);
       log(`  directory  ${root ? `${root} → project ${config.project_id}` : "not linked"}`);
+      return 0;
+    }
+
+    case "create": {
+      const name = rest.find((a) => !a.startsWith("--"));
+      const creds = load(host);
+      if (!creds?.token) throw new Error(`not authorised for ${host} — run \`fabapp login\``);
+      if (!creds.scope?.includes("write")) {
+        // Said HERE rather than left to the 403. A person who authorised read-only three days ago does not
+        // remember doing it, and "insufficient_scope" from the server is a worse place to learn it.
+        throw new Error("this machine is authorised read-only — run `fabapp login --scopes \"read write\"`");
+      }
+      await create({ host, token: creds.token, accountId: creds.account_id, name,
+                     appName: flag(argv, "app", ""), root: process.cwd(), log });
       return 0;
     }
 

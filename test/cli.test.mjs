@@ -14,6 +14,7 @@ import test from "node:test";
 
 import { ApiError, request } from "../src/api.mjs";
 import { findRoot, read, write } from "../src/config.mjs";
+import { create } from "../src/commands/create.mjs";
 import { link } from "../src/commands/link.mjs";
 import { pull, push } from "../src/commands/sync.mjs";
 
@@ -49,6 +50,56 @@ const PROJECT_FILES = [
   { path: "fab.schema.json", content: '{\n  "models": []\n}\n' },
   { path: "apps/loja/fab.config.json", content: '{\n  "kind": "app"\n}\n' },
 ];
+
+// ---- create -----------------------------------------------------------------------------------------------------
+
+test("create makes the project AND a surface, then links the directory", async (t) => {
+  // A project with no surface has nothing to publish, so both are created here rather than leaving the second for
+  // a later command to remember.
+  const s = await server(t, ({ url }) => url.includes("/apps")
+    ? { body: { id: "a1", slug: "meu-app" } }
+    : { body: { id: "p1", name: "Meu app" } });
+  const root = dir();
+
+  const out = await create({ host: s.host, token: "t", accountId: "acc-1", name: "Meu app", root, log: quiet });
+
+  assert.equal(out.project.id, "p1");
+  assert.equal(out.app.id, "a1");
+  assert.deepEqual(s.calls.map((c) => `${c.method} ${c.url}`), ["POST /projects", "POST /projects/p1/apps"]);
+  assert.equal(s.calls[0].body.account_id, "acc-1");
+  assert.equal(read(root).project_id, "p1");
+});
+
+test("a surface that fails leaves the project ALIVE and says so", async (t) => {
+  // Deleting somebody's just-created project because a second call failed is a worse outcome than an empty project
+  // they can finish by hand. The id has to reach them, or the project is lost without being deleted.
+  const s = await server(t, ({ url }) => url.includes("/apps")
+    ? { status: 500, body: { detail: "deu ruim" } }
+    : { body: { id: "p9", name: "Meu app" } });
+  const lines = [];
+
+  const out = await create({ host: s.host, token: "t", accountId: "acc-1", name: "Meu app",
+                             root: dir(), log: (l) => lines.push(l) });
+
+  assert.equal(out.app, null);
+  assert.equal(out.project.id, "p9");
+  assert.match(lines.join("\n"), /p9/, "the id of the surviving project must reach the person");
+  assert.match(lines.join("\n"), /stays/);
+});
+
+test("create refuses an empty name instead of making an unnamed project", async (t) => {
+  const s = await server(t, () => ({ body: {} }));
+  await assert.rejects(() => create({ host: s.host, token: "t", accountId: "a", name: "  ", root: dir(), log: quiet }),
+                       /give the project a name/);
+  assert.equal(s.calls.length, 0, "it must not reach the server at all");
+});
+
+test("create does not link when asked not to", async (t) => {
+  const s = await server(t, ({ url }) => url.includes("/apps") ? { body: { id: "a1", slug: "s" } } : { body: { id: "p1" } });
+  const root = dir();
+  await create({ host: s.host, token: "t", accountId: "a", name: "X", root, log: quiet, link: false });
+  assert.equal(findRoot(root), null);
+});
 
 // ---- link -------------------------------------------------------------------------------------------------------
 

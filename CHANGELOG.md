@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.2
+
+**`fabapp create "<name>"`** — a project and its first surface, without a browser.
+
+This was the last human-only step in a chain that is otherwise open to machines. A token granted `write` could
+write the schema, write the code and publish, but not create the container to put any of it in, so every agent
+workflow began with "now go and click New project in the Studio".
+
+The MCP server gains `fabapp_create_project` (write scope) for the same reason.
+
+**Fixed — `fabapp deploy` never worked.** `PUT /code` accepted a machine and `GET /code` did not, and deploy reads
+the current set *first*, so it can lay your local edits over whatever the server has now rather than over a stale
+workspace. That read answered 401 before the write was ever attempted. Nobody had hit it because until the Studio's
+`/cli` approval screen shipped, no CLI token existed to try it with. Both sides of the compare-and-swap now take
+the same credential.
+
+**A surface that fails leaves the project alive.** Creating is two calls. If the second one fails, the project is
+reported with its id and kept — deleting somebody's just-created project because a follow-up call failed is a worse
+outcome than an empty project they can finish by hand.
+
+Requires a control-plane from 2026-08-26 or later.
+
 ## 0.1.1
 
 **0.1.0 did not work when installed.** npm publishes the `bin` as a SYMLINK
