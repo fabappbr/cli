@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+**Fixed — `deploy` left the root manifests behind.** `fab.functions.json` and `fab.agents.json` live at the root of
+the app code, and the platform documents both as going up with `fabapp deploy`. The workspace walk only looked inside
+`src/`, `functions/` and `public/`, so they never left the machine: every function deployed from the CLI ran under the
+fail-closed default (`"user"`) whatever its manifest said, and agents declared here did not exist on the server.
+
+A workspace assembled by an earlier CLI already has those files on disk (the export brought them) and no record of
+them in its stamp. They are NOT treated as yours: when the server holds the same path, the local copy stays home
+(with a warning when the two differ) instead of an export-time manifest being put over what the Studio has now.
+
 ## 0.1.4
 
 **The docs stop being a suggestion.** 0.1.3 added `fabapp_docs` and asked the agent, in the MCP `instructions`, to

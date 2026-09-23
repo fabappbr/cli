@@ -9,7 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { request } from "../api.mjs";
-import { changes, fingerprint, readStamp, writeStamp } from "../workspace.mjs";
+import { ROOT_FILES, changes, fingerprint, hash, readStamp, writeStamp } from "../workspace.mjs";
 
 export async function deploy({ host, token, projectId, root, log, publish = true }) {
   const workspace = join(root, ".fabapp", "workspace");
@@ -25,7 +25,30 @@ export async function deploy({ host, token, projectId, root, log, publish = true
     throw new Error("this workspace was assembled by an earlier CLI version and does not record what came from " +
                     "the platform — run `fabapp dev --reset` (it deletes your edits, so save first)");
   }
-  const { changed, added, removed } = changes(workspace, pristine);
+  const { changed, removed } = changes(workspace, pristine);
+  let { added } = changes(workspace, pristine);
+
+  // A root manifest the STAMP never recorded is not something you wrote: workspaces assembled before the CLI walked
+  // the root already hold the export-time copy of `fab.functions.json`, and their stamp has no entry for it. Left
+  // alone, `changes()` reads it as "new" and `deploy` would put an old manifest over whatever the Studio has now —
+  // the file that decides who may call each function, rewritten by nobody. So it only goes up when the server has
+  // no such file; otherwise it stays home, and the stamp learns it on the next publish.
+  const stale = added.filter((p) => ROOT_FILES.includes(p));
+  let current = null;
+  if (stale.length) {
+    current = await request(host, `${base}/code`, { token });
+    const onServer = new Map((current.files || []).map((f) => [f.path, f.content]));
+    const kept = [];
+    for (const p of stale) {
+      if (!onServer.has(p)) continue;                      // genuinely new: it goes up
+      kept.push(p);
+      if (hash(onServer.get(p)) !== hash(readFileSync(join(workspace, p), "utf8"))) {
+        log(`  ⚠ ${p} exists here and on the server and this workspace predates it being tracked — NOT uploaded.`);
+        log("    Edit it in Studio, or `fabapp dev --reset` to start from the server's copy (it deletes your edits).");
+      }
+    }
+    added = added.filter((p) => !kept.includes(p));
+  }
 
   if (removed.length) {
     // Reported BEFORE any early exit, and never applied. A removal IS a change — leaving quietly on "nothing
@@ -45,7 +68,7 @@ export async function deploy({ host, token, projectId, root, log, publish = true
   // The DESIRED set, not a delta: `PUT /code` replaces the whole list. It starts from what the server has right
   // now — which may have moved, if the AI edited the app in Studio meanwhile — and lays your edits on top. That way
   // the work over there does not vanish because of a stale workspace.
-  const current = await request(host, `${base}/code`, { token });
+  current = current || await request(host, `${base}/code`, { token });
   const files = new Map((current.files || []).map((f) => [f.path, f.content]));
   for (const p of [...changed, ...added]) files.set(p, readFileSync(join(workspace, p), "utf8"));
 

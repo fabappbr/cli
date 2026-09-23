@@ -517,6 +517,41 @@ test("changes() tells apart edited, new and removed", () => {
   assert.deepEqual(out.removed, ["src/components/ui/button.tsx"]);
 });
 
+test("the root manifests travel with the code", () => {
+  // `fab.functions.json` decides who may call each function. Left behind, every function ran under the default
+  // ("user") whatever the manifest said — a `public` form refused visitors, a `role:` function let anyone in.
+  const root = dir();
+  const ws = stampedWorkspace(root, "http://x");
+  const pristine = fingerprint(ws);
+  writeFileSync(join(ws, "fab.functions.json"), '{ "functions": { "contact": { "auth": "public" } } }');
+  writeFileSync(join(ws, "fab.agents.json"), '{ "agents": [] }');
+  writeFileSync(join(ws, "vite.config.ts"), "// platform-owned, stays home");
+
+  assert.deepEqual(changes(ws, pristine).added, ["fab.agents.json", "fab.functions.json"]);
+});
+
+test("deploy does not put an untracked root manifest over the server's", async (t) => {
+  // A workspace assembled by an older CLI: `fab.functions.json` is on disk (the export brought it) but not in the
+  // stamp. The Studio has since tightened the manifest. The stale copy must stay home.
+  const puts = [];
+  const s = await server(t, ({ method, body }) => {
+    if (method === "PUT") { puts.push(body); return { body: { ok: true, code_rev: 2, provided_ignored: [] } }; }
+    return { body: { files: [{ path: "fab.functions.json", content: '{"functions":{"contact":{"auth":"role:admin"}}}' }],
+                     code_rev: 1 } };
+  });
+  const root = dir();
+  const ws = stampedWorkspace(root, s.host);                       // the stamp has no root manifest
+  writeFileSync(join(ws, "fab.functions.json"), '{"functions":{"contact":{"auth":"public"}}}');
+  writeFileSync(join(ws, "fab.agents.json"), '{"agents":[]}');    // absent on the server: genuinely new
+  const lines = [];
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
+
+  const sent = new Map(puts[0].files.map((f) => [f.path, f.content]));
+  assert.equal(sent.get("fab.functions.json"), '{"functions":{"contact":{"auth":"role:admin"}}}');   // the server's stays
+  assert.equal(sent.get("fab.agents.json"), '{"agents":[]}');
+  assert.ok(lines.some((l) => l.includes("fab.functions.json") && l.includes("NOT uploaded")));
+});
+
 test("a path from the server that escapes the project is refused", async (t) => {
   // `join(root, ...'../../.ssh/authorized_keys'.split('/'))` lands in somebody else's home directory. Getting here
   // needs a compromised API or FABAPP_API_URL pointed at a hostile host — which is exactly why the check exists: a

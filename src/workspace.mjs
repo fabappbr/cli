@@ -14,6 +14,13 @@ const STAMP = "workspace.json";
 const SKIP = new Set(["node_modules", "dist", ".git", ".vite", ".fabapp"]);
 /** Where app code lives. Outside of this is build infrastructure, and has no reason to travel. */
 const ROOTS = ["src", "functions", "public"];
+/**
+ * App code that lives at the ROOT of the workspace rather than under a folder. The platform documents both as going
+ * up with `deploy`, and they are not optional: `fab.functions.json` decides who may call each function. Walking only
+ * the folders left it behind, so every function deployed from here ran under the fail-closed default ("user") — a
+ * `public` contact form refused visitors and a `role:<slug>` function let in any signed-in user.
+ */
+export const ROOT_FILES = ["fab.functions.json", "fab.agents.json"];
 
 export function stampPath(root) { return join(root, ".fabapp", STAMP); }
 
@@ -41,6 +48,7 @@ export function walkWorkspace(ws) {
     }
   };
   for (const r of ROOTS) if (existsSync(join(ws, r))) visit(join(ws, r));
+  for (const f of ROOT_FILES) if (existsSync(join(ws, f)) && statSync(join(ws, f)).isFile()) out.push(f);
   return out.sort();
 }
 
