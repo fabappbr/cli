@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5
 
 **Fixed — `deploy` left the root manifests behind.** `fab.functions.json` and `fab.agents.json` live at the root of
 the app code, and the platform documents both as going up with `fabapp deploy`. The workspace walk only looked inside
