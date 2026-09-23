@@ -151,8 +151,11 @@ export const TOOLS = [
     name: "fabapp_deploy",
     scope: "write",
     description: "Publishes a surface: whatever is saved in the project goes live. It does NOT upload local code — "
-      + "use the `fabapp deploy` command for that. An account has at most 2 concurrent builds; anything beyond that "
-      + "gets 'account_builds_busy' and should be retried, it is not an error.",
+      + "use the `fabapp deploy` command for that. Two refusals, and they are opposites: 'account_builds_busy' (409) "
+      + "means an account is limited to 2 concurrent builds and the call SHOULD be retried, it is not an error; "
+      + "'build_failed' (422) means the app's code does not compile and the message carries the file, line and "
+      + "column — DO NOT retry it, fix the code first, because every attempt pays for a full build and the answer "
+      + "will not change.",
     inputSchema: {
       type: "object",
       properties: { project_id: { type: "string" }, app_id: { type: "string" } },

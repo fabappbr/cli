@@ -78,6 +78,26 @@ refusal looks like a problem with the request, not the permission.
 `fabapp_read_definition` is the one that matters most: without the schema, a wrong model id answers 404 and an
 invented field answers 422. It is the first thing an agent should call.
 
+## Dependencies and build plugins
+
+`npm install` in the workspace works the way you expect: `deploy` sends the dependencies you **added** or changed
+since the workspace was assembled, merged into the app's own `package.json` on the server. Not the whole file, which
+is mostly the platform's floor. `devDependencies` count the same as `dependencies`.
+
+What it does **not** send, and says so before uploading:
+
+- **A new version of a platform package** (react, vite, tailwindcss, the Radix packages). The build always installs
+  its own version of those.
+- **Build config.** `vite.config.ts`, `index.html` and `tsconfig*.json` are the platform's and are rewritten on every
+  build; a `postcss.config.js`, `tailwind.config.js` or `.babelrc` is never run; `@plugin`/`@config` lines in a
+  stylesheet are stripped.
+- **A removed dependency** is reported, never removed from the app.
+
+A build plugin is switched on by declaring an **allowed** package in `package.json` (Tailwind typography, scrollbar,
+safe-area and motion; svgr, Node polyfills, MDX, wasm and GLSL for Vite). The platform registers it with its own
+options, and the same file does it in `fabapp dev`, so what you see locally is what gets built. The list, with how
+to use each one, is in `fabapp_docs`.
+
 ## Template drift
 
 The template — the shell, the SDK, the components, the dependency floor — is copied by the platform on every build,

@@ -82,6 +82,53 @@ export function changes(ws, pristine) {
 
 
 /**
+ * The workspace's DEPENDENCIES, `dependencies` and `devDependencies` together. The platform installs both the same
+ * way (an SPA bundle has no use for the split), and `npm i -D` is how most plugin READMEs say to install one.
+ */
+export function readDeps(ws) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(ws, "package.json"), "utf8")) || {};
+    return { ...(pkg.devDependencies || {}), ...(pkg.dependencies || {}) };
+  } catch { return {}; }
+}
+
+/** What moved in the dependencies since the workspace was assembled. `removed` is reported and never applied, for
+ *  the same reason as a removed file (see `changes`). */
+export function depChanges(pristine, now) {
+  const added = {};
+  const changed = {};
+  for (const [name, version] of Object.entries(now)) {
+    if (!(name in pristine)) added[name] = version;
+    else if (pristine[name] !== version) changed[name] = version;
+  }
+  const removed = Object.keys(pristine).filter((name) => !(name in now));
+  return { added, changed, removed };
+}
+
+/**
+ * The platform's files at the workspace root. They are rewritten from the template on every build, so an edit to one
+ * of them never reaches the app; fingerprinting them is what lets `deploy` say so instead of letting it look sent.
+ */
+export const PLATFORM_ROOT = ["vite.config.ts", "index.html", "tsconfig.json", "tsconfig.node.json", "lazy-routes.ts",
+                              "fab-plugins.ts", "fab-plugins.json"];
+export function platformFingerprint(ws) {
+  const out = {};
+  for (const p of PLATFORM_ROOT) if (existsSync(join(ws, p))) out[p] = hash(readFileSync(join(ws, p)));
+  return out;
+}
+
+/** A build tool's config at the workspace root, which the platform never runs (the build config is its own). The same
+ *  names the server refuses; `vite.config.ts` is the platform's and is covered by `platformFingerprint`. */
+const BUILD_CONFIG = /^(?:(?:vite|vitest|postcss|tailwind|babel|svgr)\.config\.(?:[cm]?[jt]s|json)|\.postcssrc(?:\..+)?|\.babelrc(?:\..+)?|\.svgrrc(?:\..+)?)$/i;
+export function strayConfigs(ws) {
+  return readdirSync(ws).filter((f) => BUILD_CONFIG.test(f) && f !== "vite.config.ts").sort();
+}
+
+/** A stylesheet directive that loads a module into Tailwind. The platform strips it from the app's CSS: plugins are
+ *  enabled by declaring an allowed package instead (see `fabapp_docs`). */
+export const CSS_LOADER_RULE = /(^|[;{}])[ \t\r\n]*@(plugin|config)\b[^;{]*(\{[^}]*\}|;)/i;
+
+/**
  * A path coming from the SERVER, resolved inside `root` — or an error.
  *
  * `join(root, ...'../../.ssh/authorized_keys'.split('/'))` escapes `root` and writes into somebody else's

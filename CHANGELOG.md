@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.6
+
+**`deploy` sends the dependencies you added.** `package.json` lives outside `src/`, and the fingerprint that decides
+what changed only ever looked at `src/`, `functions/` and `public/`. So an `npm install` in the workspace went
+nowhere: the import reached the build with nothing declared for it, and the build failed with "failed to resolve
+import" on an app that ran fine under `fabapp dev`. The workspace now records the dependencies it came with, and
+`deploy` sends the difference, merged into the app's own `package.json` on the server rather than replacing it.
+
+A new version of a platform package (react, vite, tailwindcss, Radix) is named and not sent: the build installs its
+own version of those whatever the app pins, so the pin would be saved and never obeyed. A removed dependency is
+reported and not applied, the same rule as a removed file.
+
+**And it says what the platform ignores, before uploading.** An edit to `vite.config.ts` or the other root files the
+platform rewrites on every build, a `postcss.config.js` or `tailwind.config.js`, an `@plugin` line in a stylesheet:
+each of these worked locally and did nothing in the build, silently. Build plugins are now enabled by declaring an
+allowed package (see `fabapp_docs`), and the warning says so.
+
+**`fabapp_deploy` tells the two refusals apart.** `account_builds_busy` (409) is retried; `build_failed` (422) carries
+the file, line and column and must not be, since every attempt pays for a full build.
+
+Requires a control-plane from 2026-09-23 or later, which derives dependencies from the imports on every save and
+knows the allowed plugins. A workspace assembled by an older CLI does not record its dependencies: `deploy` says so,
+and `fabapp dev --reset` fixes it.
+
 ## 0.1.5
 
 **Fixed — `deploy` left the root manifests behind.** `fab.functions.json` and `fab.agents.json` live at the root of

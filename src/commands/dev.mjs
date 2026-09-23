@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { request } from "../api.mjs";
-import { fingerprint, readStamp, writeStamp } from "../workspace.mjs";
+import { fingerprint, platformFingerprint, readDeps, readStamp, writeStamp } from "../workspace.mjs";
 
 /** Unzips with whatever the OS ships. `unzip` first, `tar` second (bsdtar on macOS and Windows 10+ read zip). */
 function unzip(zip, into) {
@@ -88,7 +88,11 @@ export async function dev({ host, token, projectId, root, app: wanted, reset = f
     rmSync(staging, { recursive: true, force: true });
     // The FINGERPRINT of every file, taken now that the workspace is exactly what the platform handed over. It is
     // what lets `deploy` send only what YOU changed, instead of pushing the platform's files along with it.
-    writeStamp(root, { app_id: app.id, template: out.template || "", files: fingerprint(workspace) });
+    // `deps` and `platform` are the same idea for the two things that live outside `src/`: the dependencies the
+    // platform handed over, so `deploy` can send only the ones YOU added, and the platform's root files, so it can
+    // say that an edit to them never leaves this machine.
+    writeStamp(root, { app_id: app.id, template: out.template || "", files: fingerprint(workspace),
+                       deps: readDeps(workspace), platform: platformFingerprint(workspace) });
     log(`  ✓ Workspace at .fabapp/workspace · template ${out.template || "(unknown)"}`);
   } else {
     // The workspace EXISTS and holds your edits. Comparing is this command's job; overwriting is not.

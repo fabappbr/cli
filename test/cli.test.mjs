@@ -574,3 +574,103 @@ test("pull refuses to write a file the server placed outside the project", async
                        /escapes the project/);
   assert.equal(existsSync(join(root, "..", "ESCAPOU.json")), false);
 });
+
+// ---- deploy: dependencies and what the platform ignores ------------------------------------------------------------
+
+import { platformFingerprint, readDeps } from "../src/workspace.mjs";
+
+/** A workspace whose package.json is the MERGED one the export ships: the platform's floor plus the app's own deps. */
+function workspaceWithDeps(root, host) {
+  const ws = stampedWorkspace(root, host);
+  writeFileSync(join(ws, "package.json"), JSON.stringify({
+    dependencies: { react: "19.0.0", "@dnd-kit/core": "^6.3.1" }, devDependencies: { vite: "^6.0.11" } }));
+  writeFileSync(join(ws, "vite.config.ts"), "// the platform's");
+  writeStamp(root, { app_id: "a1", template: "tpl-aaaa", files: fingerprint(ws), deps: readDeps(ws),
+                     platform: platformFingerprint(ws) });
+  return ws;
+}
+const SERVER_PKG = JSON.stringify({ dependencies: { "@dnd-kit/core": "^6.3.1" } });
+const codeServer = (t, files) => server(t, ({ method }) => (method === "PUT"
+  ? { body: { ok: true, code_rev: 8, provided_ignored: [] } }
+  : { body: { files, code_rev: 7 } }));
+
+test("deploy sends the dependencies you ADDED, merged into the app's own package.json", async (t) => {
+  // package.json lives outside src/, so before this an `npm install` here went nowhere and the build failed to
+  // resolve the import.
+  const s = await codeServer(t, [{ path: "package.json", content: SERVER_PKG }]);
+  const root = dir();
+  const ws = workspaceWithDeps(root, s.host);
+  const pkg = JSON.parse(readFileSync(join(ws, "package.json"), "utf8"));
+  pkg.dependencies["framer-motion"] = "^11.0.0";
+  pkg.devDependencies["vite-plugin-svgr"] = "5.2.0";      // `npm i -D`, as the plugin's README says
+  writeFileSync(join(ws, "package.json"), JSON.stringify(pkg));
+
+  const lines = [];
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
+  const put = s.calls.find((c) => c.method === "PUT");
+  const sent = JSON.parse(put.body.files.find((f) => f.path === "package.json").content);
+  assert.deepEqual(sent.dependencies, { "@dnd-kit/core": "^6.3.1", "framer-motion": "^11.0.0", "vite-plugin-svgr": "5.2.0" },
+                   "the app's own deps plus the new ones, and none of the platform's floor");
+  assert.match(lines.join("\n"), /\+ framer-motion@\^11\.0\.0/);
+});
+
+test("a dependency change alone is a change worth saving", async (t) => {
+  const s = await codeServer(t, [{ path: "package.json", content: SERVER_PKG }]);
+  const root = dir();
+  const ws = workspaceWithDeps(root, s.host);
+  const pkg = JSON.parse(readFileSync(join(ws, "package.json"), "utf8"));
+  pkg.dependencies["@tailwindcss/typography"] = "0.5.20";
+  writeFileSync(join(ws, "package.json"), JSON.stringify(pkg));
+
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: quiet, publish: false });
+  assert.equal(s.calls.filter((c) => c.method === "PUT").length, 1);
+});
+
+test("re-pinning a platform package is named, not sent: the build keeps its own version", async (t) => {
+  const s = await codeServer(t, [{ path: "package.json", content: SERVER_PKG }]);
+  const root = dir();
+  const ws = workspaceWithDeps(root, s.host);
+  const pkg = JSON.parse(readFileSync(join(ws, "package.json"), "utf8"));
+  pkg.dependencies.react = "19.2.0";
+  writeFileSync(join(ws, "package.json"), JSON.stringify(pkg));
+  writeFileSync(join(ws, "src", "pages", "Home.tsx"), "// EU EDITEI");
+
+  const lines = [];
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
+  const put = s.calls.find((c) => c.method === "PUT");
+  assert.ok(!put.body.files.some((f) => f.path === "package.json" && f.content.includes("19.2.0")));
+  assert.match(lines.join("\n"), /platform's and the build keeps its own.*react/);
+});
+
+test("deploy warns about what the platform ignores: its root files, build configs and @plugin in a stylesheet", async (t) => {
+  const s = await codeServer(t, []);
+  const root = dir();
+  const ws = workspaceWithDeps(root, s.host);
+  writeFileSync(join(ws, "vite.config.ts"), "// I added a plugin here");
+  writeFileSync(join(ws, "postcss.config.js"), "export default {}");
+  writeFileSync(join(ws, "src", "extra.css"), '@plugin "daisyui";\n');
+
+  const lines = [];
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
+  const out = lines.join("\n");
+  assert.match(out, /never reach the app/);
+  assert.match(out, /! vite\.config\.ts/);
+  assert.match(out, /! postcss\.config\.js/);
+  assert.match(out, /@plugin\/@config in src\/extra\.css/);
+});
+
+test("a dependency removed here is reported and never removed from the app", async (t) => {
+  const s = await codeServer(t, [{ path: "package.json", content: SERVER_PKG }]);
+  const root = dir();
+  const ws = workspaceWithDeps(root, s.host);
+  const pkg = JSON.parse(readFileSync(join(ws, "package.json"), "utf8"));
+  delete pkg.dependencies["@dnd-kit/core"];
+  writeFileSync(join(ws, "package.json"), JSON.stringify(pkg));
+  writeFileSync(join(ws, "src", "pages", "Home.tsx"), "// EU EDITEI");
+
+  const lines = [];
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
+  assert.match(lines.join("\n"), /did NOT remove them from the app: @dnd-kit\/core/);
+  const put = s.calls.find((c) => c.method === "PUT");
+  assert.ok(put.body.files.some((f) => f.path === "package.json" && f.content.includes("@dnd-kit/core")));
+});
