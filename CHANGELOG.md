@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.7
+
+**A file that is not text no longer goes up corrupted.** `deploy` read every changed file as UTF-8, and Node does
+not fail on a PNG or a font: it swaps each invalid byte for U+FFFD and says nothing. The server stored the result,
+the build copied it, and the published app served an image that no longer opened, with no error at any step. The
+app's code is UTF-8 strings inside JSON, on the server and in the build, so there is no representation for a binary
+there; images, fonts and media go through the platform's storage (Brand, uploads) and are referenced by URL.
+
+`deploy` now decides from the bytes (a NUL byte, or a strict UTF-8 decode that fails), never from the extension,
+leaves those files home and names each one with the road that works. The two other text reads of the command (the
+root manifest comparison and the `@plugin` scan) stopped assuming text as well.
+
 ## 0.1.6
 
 **`deploy` sends the dependencies you added.** `package.json` lives outside `src/`, and the fingerprint that decides

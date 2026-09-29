@@ -674,3 +674,38 @@ test("a dependency removed here is reported and never removed from the app", asy
   const put = s.calls.find((c) => c.method === "PUT");
   assert.ok(put.body.files.some((f) => f.path === "package.json" && f.content.includes("@dnd-kit/core")));
 });
+
+test("a file that is not text is not uploaded, and deploy says where it goes instead", async (t) => {
+  // Read as UTF-8, a PNG arrives with every invalid byte swapped for U+FFFD and nothing complaining at any step.
+  const s = await codeServer(t, [{ path: "package.json", content: SERVER_PKG }]);
+  const root = dir();
+  const ws = workspaceWithDeps(root, s.host);
+  mkdirSync(join(ws, "public"), { recursive: true });
+  writeFileSync(join(ws, "public", "hero.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0xfe]));
+  writeFileSync(join(ws, "public", "logo.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>");
+  writeFileSync(join(ws, "public", "notes.txt"), Buffer.from([0xc3, 0x28]));   // invalid UTF-8 with a text extension
+  writeFileSync(join(ws, "src", "pages", "Home.tsx"), "// acentuação é texto: ção");
+
+  const lines = [];
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
+  const sent = s.calls.find((c) => c.method === "PUT").body.files.map((f) => f.path);
+  assert.ok(!sent.includes("public/hero.png"), "a PNG went up as mangled text");
+  assert.ok(!sent.includes("public/notes.txt"), "the extension does not decide");
+  assert.ok(sent.includes("public/logo.svg") && sent.includes("src/pages/Home.tsx"), "text still travels");
+  const out = lines.join("\n");
+  assert.match(out, /not text files[\s\S]*! public\/hero\.png[\s\S]*! public\/notes\.txt/);
+  assert.match(out, /Brand/);
+  assert.ok(!/~ public\/hero\.png/.test(out), "not listed as sent");
+});
+
+test("a binary file is the only difference: nothing is saved, and it is still named", async (t) => {
+  const s = await codeServer(t, [{ path: "package.json", content: SERVER_PKG }]);
+  const root = dir();
+  const ws = workspaceWithDeps(root, s.host);
+  mkdirSync(join(ws, "public"), { recursive: true });
+  writeFileSync(join(ws, "public", "font.woff2"), Buffer.from([0x77, 0x4f, 0x46, 0x32, 0x00, 0x01]));
+  const lines = [];
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
+  assert.equal(s.calls.filter((c) => c.method === "PUT").length, 0);
+  assert.match(lines.join("\n"), /font\.woff2/);
+});

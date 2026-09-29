@@ -9,8 +9,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { request } from "../api.mjs";
-import { CSS_LOADER_RULE, ROOT_FILES, changes, depChanges, fingerprint, hash, platformFingerprint, readDeps,
-         readStamp, strayConfigs, writeStamp } from "../workspace.mjs";
+import { CSS_LOADER_RULE, ROOT_FILES, changes, depChanges, fingerprint, hash, isBinary, platformFingerprint,
+         readDeps, readStamp, readText, strayConfigs, writeStamp } from "../workspace.mjs";
 
 export async function deploy({ host, token, projectId, root, log, publish = true }) {
   const workspace = join(root, ".fabapp", "workspace");
@@ -26,8 +26,21 @@ export async function deploy({ host, token, projectId, root, log, publish = true
     throw new Error("this workspace was assembled by an earlier CLI version and does not record what came from " +
                     "the platform — run `fabapp dev --reset` (it deletes your edits, so save first)");
   }
-  const { changed, removed } = changes(workspace, pristine);
-  let { added } = changes(workspace, pristine);
+  const { removed } = changes(workspace, pristine);
+  let { changed, added } = changes(workspace, pristine);
+
+  // A FILE THAT IS NOT TEXT DOES NOT TRAVEL. The app's code is UTF-8 strings inside JSON, on the server and in the
+  // build; an image or a font read as text arrives silently corrupted (see `isBinary`). Said up front, with the road
+  // that works: media goes through the platform's storage (Brand, uploads) and is referenced by URL.
+  const binary = [...changed, ...added].filter((p) => isBinary(readFileSync(join(workspace, p))));
+  if (binary.length) {
+    changed = changed.filter((p) => !binary.includes(p));
+    added = added.filter((p) => !binary.includes(p));
+    log("\n  ⚠ These are not text files, and the app's code only carries text — NOT uploaded:");
+    for (const p of binary) log(`    ! ${p}`);
+    log("    Upload images, fonts and media in Studio (Brand, or the app's storage) and reference them by URL;");
+    log("    a vector logo can stay in the code as an .svg.");
+  }
 
   // A root manifest the STAMP never recorded is not something you wrote: workspaces assembled before the CLI walked
   // the root already hold the export-time copy of `fab.functions.json`, and their stamp has no entry for it. Left
@@ -43,7 +56,7 @@ export async function deploy({ host, token, projectId, root, log, publish = true
     for (const p of stale) {
       if (!onServer.has(p)) continue;                      // genuinely new: it goes up
       kept.push(p);
-      if (hash(onServer.get(p)) !== hash(readFileSync(join(workspace, p), "utf8"))) {
+      if (hash(onServer.get(p)) !== hash(readFileSync(join(workspace, p)))) {
         log(`  ⚠ ${p} exists here and on the server and this workspace predates it being tracked — NOT uploaded.`);
         log("    Edit it in Studio, or `fabapp dev --reset` to start from the server's copy (it deletes your edits).");
       }
@@ -148,7 +161,7 @@ function warnIgnored({ workspace, stamp, paths, log }) {
   const now = platformFingerprint(workspace);
   const edited = stamp.platform ? Object.keys(now).filter((p) => stamp.platform[p] && stamp.platform[p] !== now[p]) : [];
   const stray = strayConfigs(workspace);
-  const css = paths.filter((p) => /\.css$/i.test(p) && CSS_LOADER_RULE.test(readFileSync(join(workspace, p), "utf8")));
+  const css = paths.filter((p) => /\.css$/i.test(p) && CSS_LOADER_RULE.test(readText(workspace, p) || ""));
   if (!edited.length && !stray.length && !css.length) return;
   log("\n  ⚠ The build config is the platform's. These never reach the app:");
   for (const p of [...edited, ...stray]) log(`    ! ${p}`);

@@ -129,6 +129,24 @@ export function strayConfigs(ws) {
 export const CSS_LOADER_RULE = /(^|[;{}])[ \t\r\n]*@(plugin|config)\b[^;{]*(\{[^}]*\}|;)/i;
 
 /**
+ * Is this file's content something other than text? The app's code travels as UTF-8 strings inside JSON, and a PNG
+ * or a font read as text does not fail: Node swaps every invalid byte for U+FFFD and says nothing, the server stores
+ * the result, the build copies it, and the published app serves a file that no longer opens. Decided from the BYTES,
+ * never from the extension: an `.svg` is text, a `.txt` may not be, and the extension is whatever the author typed.
+ */
+const utf8 = new TextDecoder("utf-8", { fatal: true });
+export function isBinary(buf) {
+  if (buf.includes(0)) return true;
+  try { utf8.decode(buf); return false; } catch { return true; }
+}
+
+/** The file as text, or null when it is not text (see `isBinary`). */
+export function readText(ws, rel) {
+  const buf = readFileSync(join(ws, ...rel.split("/")));
+  return isBinary(buf) ? null : buf.toString("utf8");
+}
+
+/**
  * A path coming from the SERVER, resolved inside `root` — or an error.
  *
  * `join(root, ...'../../.ssh/authorized_keys'.split('/'))` escapes `root` and writes into somebody else's

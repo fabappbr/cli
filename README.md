@@ -92,6 +92,9 @@ What it does **not** send, and says so before uploading:
   build; a `postcss.config.js`, `tailwind.config.js` or `.babelrc` is never run; `@plugin`/`@config` lines in a
   stylesheet are stripped.
 - **A removed dependency** is reported, never removed from the app.
+- **A file that is not text.** The app's code is UTF-8 text, on the server and in the build. An image, a font or a
+  media file in `public/` is named and left home; upload it in Studio (Brand, or the app's storage) and reference it
+  by URL. A vector logo can stay in the code as an `.svg`.
 
 A build plugin is switched on by declaring an **allowed** package in `package.json` (Tailwind typography, scrollbar,
 safe-area and motion; svgr, Node polyfills, MDX, wasm and GLSL for Vite). The platform registers it with its own
