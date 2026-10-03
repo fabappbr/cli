@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.8
+
+**`deploy` says what will fail at runtime.** The server now answers the code upload with `warnings`: a
+`callFunction('x')` whose `functions/x.ts` does not exist (a 404 on the first click), and an
+`integrations.call('<provider>')` on a provider the platform does not have — `'maps'` above all, which is not a
+provider and answered 422 on every call. The save still goes through, because a partial push is legitimate; the
+warnings are printed before `Publishing…`, where you can still stop. Requires the platform release of 2026-10-03;
+an older server answers no `warnings` and the command behaves as before.
+
 ## 0.1.7
 
 **A file that is not text no longer goes up corrupted.** `deploy` read every changed file as UTF-8, and Node does

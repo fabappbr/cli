@@ -112,6 +112,13 @@ export async function deploy({ host, token, projectId, root, log, publish = true
     log(`\n  These belong to the platform and the app cannot overwrite them — they were ignored:`);
     for (const p of saved.provided_ignored) log(`    ! ${p}`);
   }
+  if (saved.warnings?.length) {
+    // The server saved the code and still found a call that cannot work: a `callFunction` whose function file does
+    // not exist, an `integrations.call` on a provider the platform does not have. It compiles, it publishes, and it
+    // fails on the first click — so it is said HERE, before `Publishing…`, where the person can still stop.
+    log(`\n  ⚠ Saved, but these will fail at runtime:`);
+    for (const w of saved.warnings) log(`    ! ${w.file}: ${w.message}`);
+  }
 
   if (!publish) return 0;
   log("\n  Publishing…");
