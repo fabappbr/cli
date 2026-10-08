@@ -14,7 +14,8 @@ npx @fabappai/cli push
 
 | | |
 |---|---|
-| `create "<name>"` | creates a project and its first surface, and links this directory. `--app <name>` names the surface separately |
+| `projects` | lists what you can open: your own projects and, for agencies, the apps of the clients you manage, each with its account. `--account <client>` shows one client |
+| `create "<name>"` | creates a project and its first surface, and links this directory. `--app <name>` names the surface separately. `--account <client>` creates it in a client's account (by id or name): the app and the AI credits it spends are the client's |
 | `login` | authorises this machine through the device flow. `--scopes "read"` for read-only, `--no-open` on headless/CI |
 | `logout` | forgets the token **on this machine**. It stays valid on the server until it is revoked in Studio |
 | `status` | which account you are authorised on, and which project this folder is linked to |

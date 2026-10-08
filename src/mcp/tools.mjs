@@ -35,11 +35,19 @@ export const TOOLS = [
   {
     name: "fabapp_list_projects",
     scope: "read",
-    description: "Lists the projects of the authorised account. A project is the shared backend: schema, records, "
-      + "roles, end users and integrations.",
+    description: "Lists the projects this person can open: the authorised account's own, plus the apps of CLIENTS an "
+      + "agency manages (each item carries its `account_id`; `accounts` maps ids to names and says which are clients). "
+      + "A project is the shared backend: schema, records, roles, end users and integrations. AI credits spent on a "
+      + "client's project come out of the CLIENT's account.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    run: async ({ host, token, creds }) =>
-      request(host, `/projects?account_id=${encodeURIComponent(creds.account_id)}`, { token }),
+    run: async ({ host, token, creds }) => {
+      const id = encodeURIComponent(creds.account_id);
+      const [page, accounts] = await Promise.all([
+        request(host, `/projects/reachable?account_id=${id}&per_page=100`, { token }),
+        request(host, `/projects/reachable/accounts?account_id=${id}&per_page=100`, { token }),
+      ]);
+      return { projects: page.items || [], accounts: accounts.items || [] };
+    },
   },
   {
     name: "fabapp_create_project",
@@ -52,12 +60,14 @@ export const TOOLS = [
       properties: {
         name: { type: "string", description: "the project name" },
         app_name: { type: "string", description: "the first surface's name (defaults to the project name)" },
+        account_id: { type: "string", description: "a CLIENT account to create it in (from fabapp_list_projects' "
+          + "`accounts`); omitted = the authorised account. The app and the credits it spends are the client's." },
       },
       required: ["name"], additionalProperties: false,
     },
-    run: async ({ host, token, creds }, { name, app_name }) => {
+    run: async ({ host, token, creds }, { name, app_name, account_id }) => {
       const project = await request(host, "/projects", {
-        method: "POST", token, body: { account_id: creds.account_id, name, schema: { models: [] } },
+        method: "POST", token, body: { account_id: account_id || creds.account_id, name, schema: { models: [] } },
       });
       const app = await request(host, `/projects/${encodeURIComponent(project.id)}/apps`, {
         method: "POST", token, body: { name: app_name || name },

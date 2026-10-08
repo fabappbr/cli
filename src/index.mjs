@@ -17,6 +17,7 @@ import { link } from "./commands/link.mjs";
 import { login } from "./commands/login.mjs";
 import { serve as serveMcp } from "./mcp/server.mjs";
 import { pull, push } from "./commands/sync.mjs";
+import { projects, resolveAccount } from "./commands/projects.mjs";
 
 const DEFAULT_HOST = process.env.FABAPP_API_URL || "https://api.fabapp.ai";
 const log = (...a) => console.log(...a);
@@ -28,7 +29,9 @@ const USAGE = `
                  [--no-open]               do not open the browser (headless / CI)
     fabapp logout                          forget the token on THIS machine
     fabapp status                          which account you are on, and which project this folder belongs to
+    fabapp projects [--account <client>]   list what you can open, your clients' apps included
     fabapp create "<name>" [--app <name>]  create a project and its first surface, and link this directory
+                 [--account <client>]      create it in a client's account (partners: the app and its credits are the client's)
     fabapp link <project-id>               point this directory at a project
     fabapp dev [--app <slug>] [--reset]    run the app locally, on the platform's own template
     fabapp pull                            bring the project's definition to disk
@@ -90,14 +93,25 @@ export async function main(argv = process.argv.slice(2)) {
         // remember doing it, and "insufficient_scope" from the server is a worse place to learn it.
         throw new Error("this machine is authorised read-only — run `fabapp login --scopes \"read write\"`");
       }
-      await create({ host, token: creds.token, accountId: creds.account_id, name,
+      // `--account` creates in a CLIENT's account (an agency building for the client who hired it). The server
+      // decides whether this person may; the name is resolved here only so a typo fails before anything is made.
+      const accountId = await resolveAccount({ host, token: creds.token, accountId: creds.account_id,
+                                               wanted: flag(argv, "account", "") });
+      await create({ host, token: creds.token, accountId, name,
                      appName: flag(argv, "app", ""), root: process.cwd(), log });
+      return 0;
+    }
+
+    case "projects": {
+      const creds = load(host);
+      if (!creds?.token) throw new Error(`not authorised for ${host} — run \`fabapp login\``);
+      await projects({ host, token: creds.token, accountId: creds.account_id, owner: flag(argv, "account", ""), log });
       return 0;
     }
 
     case "link": {
       const projectId = rest.find((a) => !a.startsWith("--"));
-      if (!projectId) throw new Error("give the project id: `fabapp link <project-id>`");
+      if (!projectId) throw new Error("give the project id: `fabapp link <project-id>` (`fabapp projects` lists them)");
       const creds = load(host);
       if (!creds?.token) throw new Error(`not authorised for ${host} — run \`fabapp login\``);
       await link({ host, token: creds.token, projectId, root: process.cwd(), log });

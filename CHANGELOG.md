@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.9
+
+**Partners work on their clients' apps from the terminal.** `fabapp projects` lists what you can open, the apps of
+the clients your agency manages included, each with the account it belongs to. `fabapp create "<name>" --account
+<client>` creates the app in the client's account (by id, or by a name no other account shares); the app counts
+against the client's plan, and the AI credits it spends come out of the client's account. `fabapp dev`, `deploy`,
+`pull` and `push` work on a client's app once the folder is linked to it. In the MCP server, `fabapp_list_projects`
+returns the clients' projects with an `accounts` map, and `fabapp_create_project` takes an optional `account_id`.
+Requires the platform release of 2026-10-08; an older server refuses the client account and the CLI says so.
+
 ## 0.1.8
 
 **`deploy` says what will fail at runtime.** The server now answers the code upload with `warnings`: a

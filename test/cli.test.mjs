@@ -17,6 +17,7 @@ import { findRoot, read, write } from "../src/config.mjs";
 import { create } from "../src/commands/create.mjs";
 import { link } from "../src/commands/link.mjs";
 import { pull, push } from "../src/commands/sync.mjs";
+import { projects, resolveAccount } from "../src/commands/projects.mjs";
 
 const quiet = () => {};
 
@@ -708,4 +709,44 @@ test("a binary file is the only difference: nothing is saved, and it is still na
   await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
   assert.equal(s.calls.filter((c) => c.method === "PUT").length, 0);
   assert.match(lines.join("\n"), /font\.woff2/);
+});
+
+
+// ---- partner-managed clients: projects and --account ------------------------------------------------------------
+
+const ACCOUNTS = { items: [{ id: "acc-agency", name: "Estúdio Norte", kind: "own", apps: 1 },
+                           { id: "acc-lua", name: "Padaria Lua", kind: "client", apps: 2 },
+                           { id: "acc-luar", name: "Bar Luar", kind: "client", apps: 0 }] };
+
+test("projects lists the clients' apps with the account they belong to", async (t) => {
+  const s = await server(t, ({ url }) => url.startsWith("/projects/reachable/accounts")
+    ? { body: ACCOUNTS }
+    : { body: { items: [{ id: "p1", name: "Pedidos", account_id: "acc-lua", published: true },
+                        { id: "p2", name: "Site", account_id: "acc-agency", published: false }] } });
+  const lines = [];
+  const items = await projects({ host: s.host, token: "tok", accountId: "acc-agency", log: (l) => lines.push(l) });
+  assert.equal(items.length, 2);
+  const out = lines.join("\n");
+  assert.match(out, /Padaria Lua · client\s+Pedidos\s+p1\s+published/);
+  assert.match(out, /Estúdio Norte\s+Site/);
+  assert.ok(s.calls.some((c) => c.url.startsWith("/projects/reachable?") && c.url.includes("account_id=acc-agency")));
+});
+
+test("--account resolves a client by id or by a name nobody else shares, and refuses an ambiguous one", async (t) => {
+  const s = await server(t, () => ({ body: ACCOUNTS }));
+  const base = { host: s.host, token: "tok", accountId: "acc-agency" };
+  assert.equal(await resolveAccount({ ...base, wanted: "" }), "acc-agency", "no flag: the authorised account");
+  assert.equal(await resolveAccount({ ...base, wanted: "acc-lua" }), "acc-lua");
+  assert.equal(await resolveAccount({ ...base, wanted: "padaria lua" }), "acc-lua");
+  await assert.rejects(resolveAccount({ ...base, wanted: "lua" }), /more than one account/);
+  await assert.rejects(resolveAccount({ ...base, wanted: "Oficina" }), /no account matches/);
+});
+
+test("create --account sends the CLIENT's account id to the server", async (t) => {
+  const s = await server(t, ({ url }) => url.includes("/apps")
+    ? { body: { id: "a1", slug: "cardapio" } }
+    : { body: { id: "p9", name: "Cardápio" } });
+  await create({ host: s.host, token: "tok", accountId: "acc-lua", name: "Cardápio", root: dir(), log: quiet });
+  const proj = s.calls.find((c) => c.method === "POST" && c.url === "/projects");
+  assert.equal(proj.body.account_id, "acc-lua");
 });
