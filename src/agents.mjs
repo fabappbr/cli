@@ -14,7 +14,7 @@ import { request } from "./api.mjs";
 
 export const PAGE = 50;                                   // the API's default page (`listing.PAGE`)
 export const ACCESS = ["read", "write"];
-export const EVERY = ["hourly", "daily", "weekdays", "days"];
+export const EVERY = ["hourly", "daily", "weekdays", "days", "monthly", "interval", "once"];
 export const DATA_EVENTS = ["created", "updated", "deleted", "any"];
 /** Statuses after which a run never changes again (`service.TERMINAL_STATUSES`). */
 export const TERMINAL = new Set(["done", "error", "canceled", "expired"]);
@@ -127,10 +127,15 @@ export function deleteAgent({ host, token, accountId, agentId }) {
   return request(host, `${base(accountId)}/${enc(agentId)}`, { method: "DELETE", token });
 }
 
+/** The terminal's own IANA zone, sent with a proposal so "tomorrow at 3pm" is dated where the person is. */
+export function localZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined; } catch { return undefined; }
+}
+
 /** A draft from one sentence. It SAVES nothing and grants nothing; it costs one small AI call. */
-export function proposeAgent({ host, token, accountId, description }) {
+export function proposeAgent({ host, token, accountId, description, tz = localZone() }) {
   if (!String(description || "").trim()) throw new Error("describe what the agent should do, in one sentence");
-  return request(host, `${base(accountId)}/propose`, { method: "POST", token, body: { description } });
+  return request(host, `${base(accountId)}/propose`, { method: "POST", token, body: { description, tz } });
 }
 
 /** The models an agent of this account can run on. Bounded by the curated catalog, so the API does not page it. */
@@ -201,22 +206,38 @@ export function listTriggers({ host, token, accountId, agentId, limit = PAGE, of
   return request(host, `${base(accountId)}/${enc(agentId)}/triggers?limit=${limit}&offset=${offset}`, { token });
 }
 
+/** `every: "interval"` bounds, the server's (`schedule.INTERVAL_*`): 15 to 1440 minutes, a multiple of 5. */
+export const INTERVAL_MIN = 15;
+export const INTERVAL_MAX = 1440;
+
 /**
- * A schedule's config, checked here so a typo fails before the request: `every` hourly|daily|weekdays|days, `at`
- * HH:MM for all but hourly, `days` ISO weekdays (1 = Monday … 7 = Sunday) for `days`, and an optional IANA `tz`
- * (the server defaults to America/Sao_Paulo).
+ * A schedule's config, checked here so a typo fails before the request:
+ *   - `every` hourly|daily|weekdays|days|monthly|interval|once;
+ *   - `at` HH:MM for all but hourly and interval;
+ *   - `days` ISO weekdays (1 = Monday … 7 = Sunday) for `days`;
+ *   - `day` 1-31 for `monthly` (a month without that day fires on its last day: the 31st is "the end of the month");
+ *   - `minutes` for `interval`, a multiple of 5 from 15 to 1440;
+ *   - `date` YYYY-MM-DD for `once`, which fires one time and then switches itself off (the server refuses a moment
+ *     that already passed);
+ *   - an optional IANA `tz` (the server defaults to America/Sao_Paulo).
+ * A flag that belongs to another shape is refused rather than dropped: silently saving "every day" for somebody
+ * who also typed `--day 5` would be a schedule they did not ask for.
  */
-export function scheduleConfig({ every, at, days, tz }) {
+export function scheduleConfig({ every, at, days, tz, minutes, day, date }) {
   if (!EVERY.includes(every)) throw new Error(`--every is one of ${EVERY.join(", ")}`);
   const config = { every };
-  const givenDays = Array.isArray(days) ? days.length > 0 : String(days ?? "").trim() !== "";
-  if (givenDays && every !== "days") {
-    // Silently dropping the list would save "every day" for somebody who asked for Mondays and Thursdays.
-    throw new Error(`--days goes with --every days, not with '${every}'`);
+  const given = (v) => (Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && String(v).trim() !== "");
+  const owner = { days: "days", day: "monthly", minutes: "interval", date: "once" };
+  for (const [flag, value] of Object.entries({ days, day, minutes, date })) {
+    if (given(value) && every !== owner[flag]) {
+      throw new Error(`--${flag} goes with --every ${owner[flag]}, not with '${every}'`);
+    }
   }
-  if (every !== "hourly") {
+  if (every !== "hourly" && every !== "interval") {
     if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(String(at || ""))) throw new Error("--at HH:MM is required (e.g. 09:00)");
     config.at = at;
+  } else if (given(at)) {
+    throw new Error(`--at does not go with --every ${every}`);
   }
   if (every === "days") {
     const list = (Array.isArray(days) ? days : String(days || "").split(",")).map((d) => Number(String(d).trim()));
@@ -224,6 +245,29 @@ export function scheduleConfig({ every, at, days, tz }) {
       throw new Error("--days is a list of ISO weekdays, 1 = Monday … 7 = Sunday (e.g. 1,4)");
     }
     config.days = [...new Set(list)];
+  }
+  if (every === "monthly") {
+    const n = Number(String(day ?? "").trim());
+    if (!given(day) || !Number.isInteger(n) || n < 1 || n > 31) {
+      throw new Error("--day is the day of the month, 1 to 31 (29-31 fire on the last day of shorter months)");
+    }
+    config.day = n;
+  }
+  if (every === "interval") {
+    const n = Number(String(minutes ?? "").trim());
+    if (!given(minutes) || !Number.isInteger(n) || n < INTERVAL_MIN || n > INTERVAL_MAX || n % 5 !== 0) {
+      throw new Error(`--minutes is a multiple of 5 from ${INTERVAL_MIN} to ${INTERVAL_MAX} (e.g. 30; 120 = every 2 hours)`);
+    }
+    config.minutes = n;
+  }
+  if (every === "once") {
+    const d = String(date ?? "").trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+    const probe = m && new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    if (!m || probe.getUTCMonth() !== +m[2] - 1 || probe.getUTCDate() !== +m[3]) {
+      throw new Error("--date is YYYY-MM-DD (e.g. 2026-12-05)");
+    }
+    config.date = d;
   }
   if (tz) config.tz = tz;
   return config;

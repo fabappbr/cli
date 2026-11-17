@@ -37,6 +37,7 @@ and works when you message it, run it, or a trigger wakes it (a schedule, or a c
 fabapp agents create "Weekly report" --instructions "Every Monday, summarise last week's orders."
 fabapp agents grant "Weekly report"                    # the app linked to this folder, read only
 fabapp agents schedule "Weekly report" --every days --days 1 --at 09:00 --input "Last week's orders"
+fabapp agents schedule "Weekly report" --every monthly --day 5 --at 09:00 --input "Last month's orders"
 fabapp agents ask "Weekly report" "How many orders came in yesterday?"
 ```
 
@@ -52,7 +53,7 @@ fabapp agents ask "Weekly report" "How many orders came in yesterday?"
 | `agents apps` · `agents models` | the account's apps an agent can be given; the models it can run on |
 | `agents grant <agent>` · `revoke <agent>` | `--app <id\|name>` (default: the app linked to this folder), `--access read\|write` |
 | `agents triggers <agent>` | when it works |
-| `agents schedule <agent>` | `--every hourly\|daily\|weekdays\|days`, `--at HH:MM`, `--days 1,4` (1 = Monday), `--tz <zone>`, `--input "<what to do>"` |
+| `agents schedule <agent>` | `--every hourly\|daily\|weekdays\|days\|monthly\|interval\|once`, `--at HH:MM`, `--days 1,4` (1 = Monday), `--day 5` (monthly; 29 to 31 fire on the last day of shorter months), `--minutes 30` (interval: a multiple of 5 from 15 to 1440), `--date YYYY-MM-DD` (once: fires one time, then shows as `done`), `--tz <zone>`, `--input "<what to do>"` |
 | `agents watch <agent> --table <model-id>` | wakes it when that table changes: `--event created\|updated\|deleted\|any`, `--app` |
 | `agents trigger <agent> <trigger-id> on\|off\|remove` | |
 | `agents ask <agent> "<message>"` · `agents run <agent> ["<instruction>"]` | starts it and follows the run step by step until it ends. `--no-wait`, `--timeout <seconds>` (default 600; a timeout cancels nothing) |

@@ -186,21 +186,28 @@ export const AGENT_TOOLS = [
   {
     name: "fabapp_add_agent_trigger",
     scope: "write",
-    description: "Sets WHEN an agent works on its own. kind=schedule: `every` hourly|daily|weekdays|days, `at` HH:MM "
-      + "(not for hourly), `days` ISO weekdays 1=Monday..7=Sunday (for every=days), `tz` an IANA zone (default "
-      + "America/Sao_Paulo). kind=data: wakes it when a record of `table` (a model id from the app's "
+    description: "Sets WHEN an agent works on its own. kind=schedule: `every` hourly|daily|weekdays|days|monthly|"
+      + "interval|once; `at` HH:MM (not for hourly or interval); `days` ISO weekdays 1=Monday..7=Sunday (for "
+      + "every=days); `day` 1-31 (for monthly; 29-31 fire on the last day of shorter months); `minutes` a multiple of "
+      + "5 from 15 to 1440 (for interval: every N minutes, each run costs credits and counts toward the agent's "
+      + "monthly cap); `date` YYYY-MM-DD (for once: fires one time, then switches off; must be in the future); `tz` "
+      + "an IANA zone (default America/Sao_Paulo). kind=data: wakes it when a record of `table` (a model id from the app's "
       + "fab.schema.json) is created|updated|deleted|any in `project_id`, which the agent must be able to READ. "
       + "`input` is what to do on each firing. Webhook triggers are created in the Studio.",
     inputSchema: object({ account_id: ACCOUNT, agent_id: AGENT, kind: { type: "string", enum: ["schedule", "data"] },
       every: { type: "string", enum: A.EVERY }, at: { type: "string" },
       days: { type: "array", items: { type: "integer", minimum: 1, maximum: 7 } }, tz: { type: "string" },
+      day: { type: "integer", minimum: 1, maximum: 31 },
+      minutes: { type: "integer", minimum: A.INTERVAL_MIN, maximum: A.INTERVAL_MAX, multipleOf: 5 },
+      date: { type: "string", description: "YYYY-MM-DD" },
       project_id: { type: "string" }, table: { type: "string" }, event: { type: "string", enum: A.DATA_EVENTS },
       input: { type: "string" } }, ["agent_id", "kind"]),
     run: async (c, args) => {
       const ctx = await agentCtx(c, args);
       const config = args.kind === "data"
         ? { project: args.project_id, model: args.table, event: args.event || "created" }
-        : A.scheduleConfig({ every: args.every, at: args.at, days: args.days, tz: args.tz });
+        : A.scheduleConfig({ every: args.every, at: args.at, days: args.days, tz: args.tz,
+                             minutes: args.minutes, day: args.day, date: args.date });
       return A.addTrigger({ ...ctx, kind: args.kind, config, input: args.input || "" });
     },
   },

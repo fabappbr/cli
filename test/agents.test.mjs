@@ -177,9 +177,35 @@ test("a schedule is checked here, so a typo fails before the request", () => {
   assert.deepEqual(A.scheduleConfig({ every: "hourly" }), { every: "hourly" });
   assert.throws(() => A.scheduleConfig({ every: "daily" }), /--at HH:MM/);
   assert.throws(() => A.scheduleConfig({ every: "days", at: "09:00", days: "0,8" }), /ISO weekdays/);
-  assert.throws(() => A.scheduleConfig({ every: "monthly", at: "09:00" }), /--every/);
+  assert.throws(() => A.scheduleConfig({ every: "yearly", at: "09:00" }), /--every/);
   assert.throws(() => A.scheduleConfig({ every: "daily", at: "09:00", days: "1,4" }), /--every days/);
   assert.deepEqual(A.scheduleConfig({ every: "daily", at: "09:00", days: [] }), { every: "daily", at: "09:00" });
+});
+
+test("monthly, interval and once carry the field of their own shape, and only that one", () => {
+  assert.deepEqual(A.scheduleConfig({ every: "monthly", at: "09:00", day: "31", tz: "Europe/Berlin" }),
+                   { every: "monthly", at: "09:00", day: 31, tz: "Europe/Berlin" });
+  assert.deepEqual(A.scheduleConfig({ every: "interval", minutes: "30" }), { every: "interval", minutes: 30 });
+  assert.deepEqual(A.scheduleConfig({ every: "once", date: "2026-12-05", at: "15:00" }),
+                   { every: "once", at: "15:00", date: "2026-12-05" });
+  assert.throws(() => A.scheduleConfig({ every: "monthly", at: "09:00" }), /--day/);
+  assert.throws(() => A.scheduleConfig({ every: "monthly", at: "09:00", day: 32 }), /--day/);
+  for (const minutes of [10, 17, 1445, "abc"]) {
+    assert.throws(() => A.scheduleConfig({ every: "interval", minutes }), /--minutes/);
+  }
+  assert.throws(() => A.scheduleConfig({ every: "interval", minutes: 30, at: "09:00" }), /--at does not go/);
+  assert.throws(() => A.scheduleConfig({ every: "once", date: "2026-02-30", at: "09:00" }), /--date/);
+  assert.throws(() => A.scheduleConfig({ every: "once", date: "05/12/2026", at: "09:00" }), /--date/);
+  assert.throws(() => A.scheduleConfig({ every: "once", date: "2026-12-05" }), /--at HH:MM/);
+  assert.throws(() => A.scheduleConfig({ every: "daily", at: "09:00", day: 5 }), /--day goes with --every monthly/);
+  assert.throws(() => A.scheduleConfig({ every: "daily", at: "09:00", minutes: 30 }), /--minutes goes with --every interval/);
+  assert.throws(() => A.scheduleConfig({ every: "monthly", at: "09:00", day: 5, date: "2026-12-05" }), /--date goes with --every once/);
+});
+
+test("a proposal carries the terminal's zone, so a one-off is dated where the person is", async (t) => {
+  const s = await server(t, () => ({ body: { name: "x", schedule: null, resources: [] } }));
+  await A.proposeAgent({ host: s.host, token: "t", accountId: ACC, description: "amanhã às 15h", tz: "Europe/Berlin" });
+  assert.deepEqual(s.calls.at(-1).body, { description: "amanhã às 15h", tz: "Europe/Berlin" });
 });
 
 test("webhook triggers are left to the Studio: their secret does not belong in a terminal", () => {
@@ -324,4 +350,12 @@ test("fabapp_ask_agent answers the run's outcome, with the Studio link when it p
   assert.equal(r.outcome, "awaiting_approval");
   assert.equal(r.waiting_for_approval[0].label, "Delete 3 records");
   assert.match(r.approve_in_studio, /\/agents\/op-1$/);
+});
+
+test("the schedule flags of the new shapes are value flags, not refused as unknown", async () => {
+  const { parseArgs } = await import("../src/commands/agents.mjs");
+  const { flags } = parseArgs(["schedule", "x", "--every", "monthly", "--day", "5", "--minutes", "30", "--date", "2026-12-05"]);
+  assert.equal(flags.day, "5");
+  assert.equal(flags.minutes, "30");
+  assert.equal(flags.date, "2026-12-05");
 });

@@ -14,7 +14,7 @@ import * as A from "../agents.mjs";
 /** The flags that take a value. Anything else that starts with `--` is a switch. */
 const VALUE_FLAGS = new Set(["account", "host", "q", "state", "page", "sort", "name", "summary", "instructions",
   "instructions-file", "model", "steps", "credit-cap", "email", "from", "app", "access", "every", "at", "days", "tz",
-  "input", "table", "event", "timeout"]);
+  "day", "minutes", "date", "input", "table", "event", "timeout"]);
 
 /** The switches. A flag in neither list is refused: see `parseArgs`. */
 const SWITCHES = new Set(["yes", "here", "paused", "no-wait", "help"]);
@@ -76,8 +76,9 @@ export const AGENTS_USAGE = `
     fabapp agents grant <agent> [--app <id|name>] [--access read|write]   default: the app linked to this folder, read
     fabapp agents revoke <agent> [--app <id|name>]
     fabapp agents triggers <agent>                      when it works
-    fabapp agents schedule <agent> --every hourly|daily|weekdays|days [--at HH:MM] [--days 1,4] [--tz <zone>]
-                         [--input "<what to do>"]
+    fabapp agents schedule <agent> --every hourly|daily|weekdays|days|monthly|interval|once [--at HH:MM]
+                         [--days 1,4] [--day 5] [--minutes 30] [--date YYYY-MM-DD] [--tz <zone>]
+                         [--input "<what to do>"]   (--day 29-31: last day of shorter months; once: fires one time)
     fabapp agents watch <agent> --table <model-id> [--event created|updated|deleted|any] [--app <id|name>]
                          [--input "<what to do>"]      wake it when that table changes
     fabapp agents trigger <agent> <trigger-id> on|off|remove
@@ -90,6 +91,9 @@ export const AGENTS_USAGE = `
     <agent> is its id or its name. Add --account <client> to work in another account you belong to.
     Approvals are given in the Studio: a run that needs one stops and prints the link.
 `;
+
+/** on, off, or done: a one-off schedule that already fired is switched off by the server and cannot be resumed. */
+const triggerState = (t) => (t.done ? "done" : t.enabled ? "on" : "off");
 
 function table(log, head, rows) {
   const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => String(r[i] ?? "").length)));
@@ -226,7 +230,7 @@ export async function agents({ host, token, accountId, scope = "read write", arg
       log("");
       log(`  TRIGGERS (${triggers.total ?? 0})`);
       for (const t of triggers.items || []) {
-        log(`    ${t.id} · ${t.kind} · ${t.label || JSON.stringify(t.config)} · ${t.enabled ? "on" : "off"}`
+        log(`    ${t.id} · ${t.kind} · ${t.label || JSON.stringify(t.config)} · ${triggerState(t)}`
             + (t.next_run_at ? ` · next ${when(t.next_run_at)} UTC` : ""));
       }
       log("");
@@ -339,7 +343,7 @@ export async function agents({ host, token, accountId, scope = "read write", arg
         return 0;
       }
       table(log, ["ID", "KIND", "WHEN", "STATE", "NEXT RUN (UTC)", "INPUT"], items.map((t) => [
-        t.id, t.kind, t.label || JSON.stringify(t.config), t.enabled ? "on" : "off", when(t.next_run_at),
+        t.id, t.kind, t.label || JSON.stringify(t.config), triggerState(t), when(t.next_run_at),
         (t.input || "").slice(0, 40)]));
       pager(log, { total: out.total, offset: out.offset ?? 0, count: items.length }, `--page ${page + 1}`);
       return 0;
@@ -347,7 +351,8 @@ export async function agents({ host, token, accountId, scope = "read write", arg
 
     case "schedule": {
       const agentId = await agentArg();
-      const config = A.scheduleConfig({ every: flags.every, at: flags.at, days: flags.days, tz: flags.tz });
+      const config = A.scheduleConfig({ every: flags.every, at: flags.at, days: flags.days, tz: flags.tz,
+                                        minutes: flags.minutes, day: flags.day, date: flags.date });
       const t = await A.addTrigger({ ...ctx, agentId, kind: "schedule", config, input: flags.input || "" });
       log(`  ✓ Trigger ${t.id} · ${t.label || flags.every}${t.next_run_at ? ` · next ${when(t.next_run_at)} UTC` : ""}`);
       return 0;
