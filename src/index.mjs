@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 
 import { findRoot, read } from "./config.mjs";
 import { clear, load } from "./credentials.mjs";
+import { agents, AGENTS_USAGE } from "./commands/agents.mjs";
 import { create } from "./commands/create.mjs";
 import { deploy } from "./commands/deploy.mjs";
 import { dev } from "./commands/dev.mjs";
@@ -17,7 +18,7 @@ import { link } from "./commands/link.mjs";
 import { login } from "./commands/login.mjs";
 import { serve as serveMcp } from "./mcp/server.mjs";
 import { pull, push } from "./commands/sync.mjs";
-import { projects, resolveAccount } from "./commands/projects.mjs";
+import { projects, reachableAccounts, resolveAccount } from "./commands/projects.mjs";
 
 const DEFAULT_HOST = process.env.FABAPP_API_URL || "https://api.fabapp.ai";
 const log = (...a) => console.log(...a);
@@ -37,6 +38,8 @@ const USAGE = `
     fabapp pull                            bring the project's definition to disk
     fabapp push                            send back what is on disk
     fabapp deploy [--no-publish]           upload what you edited in the workspace, then publish
+    fabapp agents [list|show|create|…]     the account's AI agents: create, give them apps, schedule, talk to them
+                                           (\`fabapp agents help\` for every subcommand)
     fabapp mcp                             MCP server over stdio — for Claude Code and friends
 
   The API base comes from FABAPP_API_URL (default: ${DEFAULT_HOST}).
@@ -116,6 +119,31 @@ export async function main(argv = process.argv.slice(2)) {
       if (!creds?.token) throw new Error(`not authorised for ${host} — run \`fabapp login\``);
       await link({ host, token: creds.token, projectId, root: process.cwd(), log });
       return 0;
+    }
+
+    case "agents": {
+      // Account-level, like `projects`: no linked folder is needed. A linked one only supplies the default app for
+      // `grant`, `revoke`, `watch` and `list --here`.
+      if (rest[0] === "help" || rest.includes("--help")) { log(AGENTS_USAGE); return 0; }
+      const creds = load(host);
+      if (!creds?.token) throw new Error(`not authorised for ${host} — run \`fabapp login\``);
+      const accountId = await resolveAccount({ host, token: creds.token, accountId: creds.account_id,
+                                               wanted: flag(argv, "account", "") });
+      try {
+        return await agents({ host, token: creds.token, accountId, scope: creds.scope, args: rest, log });
+      } catch (e) {
+        if (e.status !== 401) throw e;
+        // A 401 here is one of two things, and nothing above tells them apart (without `--account` no request was
+        // made before this one). A route the CLI token has always reached is asked: refused there too, the token is
+        // dead; accepted, it is the agent routes refusing a CLI token, a server older than the release that opened
+        // them. Said plainly instead of "token inválido".
+        const tokenDead = await reachableAccounts({ host, token: creds.token, accountId: creds.account_id })
+          .then(() => false, (probe) => probe.status === 401);
+        throw new Error(tokenDead
+          ? `the token for ${host} is no longer valid: run \`fabapp login\` again`
+          : "this server does not let the CLI manage agents yet (it answered 401). Use the Studio, "
+            + "or update the platform; if the token was revoked, run `fabapp login` again");
+      }
     }
 
     case "mcp": {

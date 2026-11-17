@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Fabapp Agents from the terminal and from Claude Code.** `fabapp agents` creates and edits the account's AI agents,
+grants them apps (`grant`, defaulting to the app linked to the folder), sets when they work (`schedule`, `watch` for
+a change in a table, `trigger … on|off|remove`), talks to them (`ask`, `run`, following the run step by step) and
+reads what they did (`runs`). Listings page 50 at a time. The MCP server gains the same capabilities as
+`fabapp_*agent*` tools. Approving an action an agent paused on stays in the Studio, by a person: `ask` and `run`
+stop with the link, and there is no approve tool. Requires the platform release that lets a CLI token reach the
+agent routes; an older server answers 401 to them.
+
 ## 0.1.9
 
 **Partners work on their clients' apps from the terminal.** `fabapp projects` lists what you can open, the apps of

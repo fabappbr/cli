@@ -27,6 +27,47 @@ npx @fabappai/cli push
 
 `FABAPP_API_URL` changes the API base (default `https://api.fabapp.ai`).
 
+## Agents
+
+`fabapp agents` manages the account's **Fabapp Agents**: AI agents that work on your apps on their own. An agent
+belongs to the account, reaches an app only after you grant it (`read`, or `write` to create and change records),
+and works when you message it, run it, or a trigger wakes it (a schedule, or a change in one of an app's tables).
+
+```bash
+fabapp agents create "Weekly report" --instructions "Every Monday, summarise last week's orders."
+fabapp agents grant "Weekly report"                    # the app linked to this folder, read only
+fabapp agents schedule "Weekly report" --every days --days 1 --at 09:00 --input "Last week's orders"
+fabapp agents ask "Weekly report" "How many orders came in yesterday?"
+```
+
+| | |
+|---|---|
+| `agents [list]` | one page of 50, with each agent's state and last and next run. `--q <name>`, `--state waiting\|failed\|running\|active\|paused`, `--here` (only agents that reach this folder's app), `--page <n>` |
+| `agents show <agent>` | instructions, model, limits, what it can reach (the effective level), triggers, last runs and its Studio link |
+| `agents create "<name>"` | `--instructions <text>` or `--instructions-file <path>`, `--summary`, `--model <id>` (`agents models`), `--paused`. `--from "<one sentence>"` drafts it with AI and creates it with the draft's app grants and trigger, listing each |
+| `agents propose "<one sentence>"` | only shows the draft; nothing is saved |
+| `agents update <agent>` | `--name`, `--summary`, `--instructions`/`--instructions-file`, `--model`, `--steps <n>`, `--credit-cap <n>`, `--email on\|off` |
+| `agents pause <agent>` · `resume <agent>` | a paused agent fires no trigger and refuses messages |
+| `agents delete <agent> --yes` | deletes it with its runs, chat, memory, triggers and grants. Without `--yes` it only says what would go. Takes the id or the full name, never part of a name |
+| `agents apps` · `agents models` | the account's apps an agent can be given; the models it can run on |
+| `agents grant <agent>` · `revoke <agent>` | `--app <id\|name>` (default: the app linked to this folder), `--access read\|write` |
+| `agents triggers <agent>` | when it works |
+| `agents schedule <agent>` | `--every hourly\|daily\|weekdays\|days`, `--at HH:MM`, `--days 1,4` (1 = Monday), `--tz <zone>`, `--input "<what to do>"` |
+| `agents watch <agent> --table <model-id>` | wakes it when that table changes: `--event created\|updated\|deleted\|any`, `--app` |
+| `agents trigger <agent> <trigger-id> on\|off\|remove` | |
+| `agents ask <agent> "<message>"` · `agents run <agent> ["<instruction>"]` | starts it and follows the run step by step until it ends. `--no-wait`, `--timeout <seconds>` (default 600; a timeout cancels nothing) |
+| `agents runs <agent> [<run-id>]` · `agents cancel <agent> <run-id>` | the runs, newest first; one run with its answer and every step |
+
+`<agent>` is the id or the name (part of a name is enough when only one agent matches). `--account <client>` works in another account you belong to. An agent reaches only
+the apps of its own account.
+
+**Approvals are given in the Studio, never here.** When an agent reaches something that cannot be undone (an
+e-mail sent, records deleted) the run pauses, and `ask`/`run` stop with what it is waiting for and the link to the
+agent in the Studio, where a person approves or declines. The API refuses a CLI token on the approval routes, so an
+agent driven from a terminal can never approve its own request. Connected accounts (Gmail, calendars), MCP servers,
+webhook triggers (their secret is shown once), memory and playbooks are managed in the Studio too.
+`FABAPP_STUDIO_URL` sets the Studio base for the links (default: the API host with `api.` turned into `app.`).
+
 ## What it will not do, on purpose
 
 **It will not write over what you edited.** `dev` assembles `.fabapp/workspace` once; on later runs it **compares**
@@ -71,6 +112,13 @@ It uses the credential `fabapp login` already stored — it never asks for a sec
 | `fabapp_docs` — **read this first** | read |
 | `fabapp_list_projects` · `fabapp_list_apps` · `fabapp_read_definition` · `fabapp_app_status` | read |
 | `fabapp_create_project` · `fabapp_write_definition` · `fabapp_deploy` | write |
+| `fabapp_list_agents` · `fabapp_get_agent` · `fabapp_list_agent_apps` · `fabapp_list_agent_models` · `fabapp_list_agent_runs` · `fabapp_get_agent_run` | read |
+| `fabapp_propose_agent` · `fabapp_create_agent` · `fabapp_update_agent` · `fabapp_delete_agent` · `fabapp_grant_agent_app` · `fabapp_revoke_agent_app` · `fabapp_add_agent_trigger` · `fabapp_set_agent_trigger` · `fabapp_ask_agent` · `fabapp_run_agent` · `fabapp_cancel_agent_run` | write |
+
+The agent tools mirror `fabapp agents`. `fabapp_delete_agent` is permanent and takes `confirm: true`.
+`fabapp_ask_agent` and `fabapp_run_agent` wait up to `wait_seconds` (default 60, max 300) and answer the outcome:
+`done` with the `result`, `awaiting_approval` with `approve_in_studio` (there is no approve tool, on purpose),
+`timeout`, or `queued`.
 
 **The scope decides the list.** A token granted read-only does not *see* the write tools. Advertising one that will
 answer 403 is worse than not advertising it: the model tries, fails, and tries again with different arguments — the

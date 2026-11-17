@@ -11,6 +11,7 @@
  * request rather than with the permission.
  */
 import { request } from "../api.mjs";
+import { AGENT_TOOLS } from "./agent-tools.mjs";
 
 /** `scope` is "read" or "write": the least the tool requires. */
 export const TOOLS = [
@@ -178,6 +179,8 @@ export const TOOLS = [
       return { status: out.status, url: out.bundle_url, published_at: out.published_at };
     },
   },
+  // Fabapp Agents (the account's AI agents): declared in their own file, the same shape as the ones above.
+  ...AGENT_TOOLS,
 ];
 
 /** The tools THIS token can use. See the note at the top. */
