@@ -92,6 +92,11 @@ export const AGENTS_USAGE = `
     Approvals are given in the Studio: a run that needs one stops and prints the link.
 `;
 
+/** The outcomes `ask` and `run` exit 0 on: the run ended well, or is waiting for somebody, or is still working. */
+const RUN_OK = ["done", A.PAUSED_FOR_APPROVAL, A.AWAITING_CUSTOMER, "timeout"];
+/** The exit code of `ask` and `run`, from what `follow` answered (`--no-wait` answers the run, with no outcome). */
+const exitOf = (s) => (s?.outcome && !RUN_OK.includes(s.outcome) ? 1 : 0);
+
 /** on, off, or done: a one-off schedule that already fired is switched off by the server and cannot be resumed. */
 const triggerState = (t) => (t.done ? "done" : t.enabled ? "on" : "off");
 
@@ -134,7 +139,10 @@ function when(t) {
 function stateOf(agent) {
   if (!agent.enabled) return "paused";
   const s = agent.last_run?.status;
-  return s === A.PAUSED_FOR_APPROVAL ? "needs approval" : s || "never ran";
+  if (A.awaitsCustomer(agent.last_run)) return "waiting for a customer";
+  if (s === A.PAUSED_FOR_APPROVAL) return "needs approval";
+  if (s === A.AWAITING_AGENT) return "waiting on another agent";
+  return s || "never ran";
 }
 
 function printRunEnd(log, host, agentId, out) {
@@ -150,25 +158,41 @@ function printRunEnd(log, host, agentId, out) {
     for (const a of s.waiting_for_approval || []) log(`    · ${a.label || a.action}`);
     log(`    Approve or decline in the Studio: ${s.approve_in_studio}`);
     log("    (Approvals are never given from the CLI. After you decide, the run continues by itself.)");
+  } else if (s.outcome === A.AWAITING_CUSTOMER) {
+    log(`  ⏸ Waiting for the app's user to confirm in the app · run ${s.run_id}`);
+    for (const a of s.waiting_for_approval || []) log(`    · ${a.label || a.action}`);
   } else if (s.outcome === "timeout") {
-    log(`  … Still working · run ${s.run_id}. Nothing was cancelled.`);
+    log(`  … ${s.waiting_on ? `Waiting for ${s.waiting_on.agent_name || "another agent"}` : "Still working"}`
+        + ` · run ${s.run_id}. Nothing was cancelled.`);
     log(`    Follow it with \`fabapp agents runs ${agentId} ${s.run_id}\`.`);
   } else {
     log(`  ✗ ${s.outcome} · run ${s.run_id}${s.error ? `: ${s.error}` : ""}`);
   }
+  if (s.incomplete) {
+    log("    ⚠ Part of the job did not fit the run's steps and was left undone."
+        + ` Raise the limit with \`fabapp agents update ${agentId} --steps <n>\`.`);
+  }
   return s;
 }
 
-async function follow({ host, token, accountId, agentId, run, flags, log }) {
+/**
+ * `--timeout` in milliseconds. Read BEFORE the message is sent or the run started: refused after that, the command
+ * failed while the agent was already working (and spending credits), and a retry sent the same thing twice.
+ */
+function waitMs(flags) {
+  const seconds = flags.timeout === undefined ? 600 : Number(flags.timeout);
+  if (!(seconds > 0)) throw new Error("--timeout is a number of seconds");
+  return seconds * 1000;
+}
+
+async function follow({ host, token, accountId, agentId, run, flags, timeoutMs, log }) {
   if (flags["no-wait"]) {
     log(`  ✓ Started · run ${run.id} (${run.status}). Follow it with \`fabapp agents runs ${agentId} ${run.id}\`.`);
     return run;
   }
-  const seconds = flags.timeout === undefined ? 600 : Number(flags.timeout);
-  if (!(seconds > 0)) throw new Error("--timeout is a number of seconds");
   log(`  … run ${run.id}`);
   const out = await A.waitForRun({
-    host, token, accountId, agentId, run, timeoutMs: seconds * 1000,
+    host, token, accountId, agentId, run, timeoutMs,
     onStep: (s) => { if (s.title) log(`    · ${s.title}${s.ok === false ? "  (failed)" : ""}`); },
   });
   return printRunEnd(log, host, agentId, out);
@@ -230,7 +254,7 @@ export async function agents({ host, token, accountId, scope = "read write", arg
       log("");
       log(`  TRIGGERS (${triggers.total ?? 0})`);
       for (const t of triggers.items || []) {
-        log(`    ${t.id} · ${t.kind} · ${t.label || JSON.stringify(t.config)} · ${triggerState(t)}`
+        log(`    ${t.id} · ${t.kind} · ${A.describeTrigger(t)} · ${triggerState(t)}`
             + (t.next_run_at ? ` · next ${when(t.next_run_at)} UTC` : ""));
       }
       log("");
@@ -343,7 +367,7 @@ export async function agents({ host, token, accountId, scope = "read write", arg
         return 0;
       }
       table(log, ["ID", "KIND", "WHEN", "STATE", "NEXT RUN (UTC)", "INPUT"], items.map((t) => [
-        t.id, t.kind, t.label || JSON.stringify(t.config), triggerState(t), when(t.next_run_at),
+        t.id, t.kind, A.describeTrigger(t), triggerState(t), when(t.next_run_at),
         (t.input || "").slice(0, 40)]));
       pager(log, { total: out.total, offset: out.offset ?? 0, count: items.length }, `--page ${page + 1}`);
       return 0;
@@ -354,7 +378,7 @@ export async function agents({ host, token, accountId, scope = "read write", arg
       const config = A.scheduleConfig({ every: flags.every, at: flags.at, days: flags.days, tz: flags.tz,
                                         minutes: flags.minutes, day: flags.day, date: flags.date });
       const t = await A.addTrigger({ ...ctx, agentId, kind: "schedule", config, input: flags.input || "" });
-      log(`  ✓ Trigger ${t.id} · ${t.label || flags.every}${t.next_run_at ? ` · next ${when(t.next_run_at)} UTC` : ""}`);
+      log(`  ✓ Trigger ${t.id} · ${A.describeTrigger(t)}${t.next_run_at ? ` · next ${when(t.next_run_at)} UTC` : ""}`);
       return 0;
     }
 
@@ -364,7 +388,7 @@ export async function agents({ host, token, accountId, scope = "read write", arg
       const app = await appArg();
       const t = await A.addTrigger({ ...ctx, agentId, kind: "data", input: flags.input || "",
                                      config: { project: app.id, model: flags.table, event: flags.event || "created" } });
-      log(`  ✓ Trigger ${t.id} · when a ${flags.table} record is ${flags.event || "created"} in ${app.name}`);
+      log(`  ✓ Trigger ${t.id} · ${A.describeTrigger({ names: { app: app.name }, ...t })}`);
       return 0;
     }
 
@@ -387,22 +411,22 @@ export async function agents({ host, token, accountId, scope = "read write", arg
     case "ask": {
       const agentId = await agentArg();
       const text = positional.slice(1).join(" ");
+      const timeoutMs = waitMs(flags);
       const out = await A.sendMessage({ ...ctx, agentId, text });
       if (out.queued) {
         log(`  ✓ Queued: the agent is busy with run ${out.active_run?.id}, and reads your message as soon as it ends.`);
         log(`    Read the answer later with \`fabapp agents runs ${agentId}\`.`);
         return 0;
       }
-      const s = await follow({ ...ctx, agentId, run: out.run, flags, log });
-      return s?.outcome && !["done", A.PAUSED_FOR_APPROVAL, "timeout"].includes(s.outcome) ? 1 : 0;
+      return exitOf(await follow({ ...ctx, agentId, run: out.run, flags, timeoutMs, log }));
     }
 
     case "run": {
       const agentId = await agentArg();
       // `--input` too: it is how `schedule` and `watch` name the same thing, and it was read and then dropped here.
+      const timeoutMs = waitMs(flags);
       const run = await A.startRun({ ...ctx, agentId, input: positional.slice(1).join(" ") || flags.input || "" });
-      const s = await follow({ ...ctx, agentId, run, flags, log });
-      return s?.outcome && !["done", A.PAUSED_FOR_APPROVAL, "timeout"].includes(s.outcome) ? 1 : 0;
+      return exitOf(await follow({ ...ctx, agentId, run, flags, timeoutMs, log }));
     }
 
     case "runs": {
@@ -445,8 +469,11 @@ function printDraft(log, draft) {
   log("  " + (draft.instructions || "").trim().split("\n").join("\n  "));
   log("");
   for (const r of draft.resources || []) log(`  · ${r.label || r.resource_id} (${r.resource_kind}) · ${r.access}${r.why ? ` · ${r.why}` : ""}`);
-  if (draft.schedule) log(`  · schedule: ${draft.schedule.label || JSON.stringify(draft.schedule.config)}`);
-  if (draft.data_trigger) log(`  · when a ${draft.data_trigger.table} record is ${draft.data_trigger.config?.event} in ${draft.data_trigger.app}`);
+  if (draft.schedule) log(`  · schedule: ${A.describeTrigger({ kind: "schedule", ...draft.schedule })}`);
+  if (draft.data_trigger) {
+    const { app, table, config } = draft.data_trigger;
+    log(`  · ${A.describeTrigger({ kind: "data", config, names: { app, table } })}`);
+  }
   log("");
 }
 
@@ -479,7 +506,7 @@ async function createFromSentence({ ctx, flags, log, name }) {
   for (const t of triggers) {
     try {
       const made = await A.addTrigger({ ...ctx, agentId: agent.id, ...t });
-      log(`  ✓ Trigger ${made.id} · ${made.label || t.kind}`);
+      log(`  ✓ Trigger ${made.id} · ${A.describeTrigger(made)}`);
     } catch (e) { log(`  ⚠ The ${t.kind} trigger was not created: ${e.message}`); }
   }
   if (later.length) {

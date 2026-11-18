@@ -7,7 +7,6 @@
  * irreversible. There is no approve tool, and that is the point: the API refuses a CLI token on the approval routes,
  * so the model in this conversation can never approve what an agent asked a human to approve.
  */
-import { request } from "../api.mjs";
 import * as A from "../agents.mjs";
 
 const ACCOUNT = { type: "string", description: "the account the agent belongs to; omitted = the authorised account "
@@ -27,24 +26,30 @@ async function agentCtx({ host, token, creds }, args, { exact = false } = {}) {
 }
 
 async function waitAndSummarize(ctx, run, waitSeconds) {
-  const seconds = waitSeconds === undefined ? 60 : Math.min(300, Math.max(0, Number(waitSeconds) || 0));
-  const out = await A.waitForRun({ ...ctx, run, timeoutMs: seconds * 1000 });
-  return A.summarize({ host: ctx.host, agentId: ctx.agentId, ...out });
+  // `null` is "not given", like `undefined`: a client that fills in what it left out would otherwise wait 0 seconds.
+  const seconds = waitSeconds == null ? 60 : Math.min(300, Math.max(0, Number(waitSeconds) || 0));
+  try {
+    const out = await A.waitForRun({ ...ctx, run, timeoutMs: seconds * 1000 });
+    return A.summarize({ host: ctx.host, agentId: ctx.agentId, ...out });
+  } catch (e) {
+    // The run already started and goes on. Without its id the failure reads as "it did not run", and the natural
+    // next move is to start it again: a second run, or the same message sent twice.
+    e.message = `${e.message}. Run ${run.id} was started and goes on: read it with fabapp_get_agent_run, do not `
+      + "start it again.";
+    throw e;
+  }
 }
 
-/** A 401 on an agent route is one of two things. A route the CLI token has always reached is asked: refused there
- *  too, the token is dead; accepted, it is a server older than the release that opened the agent routes. */
+/** A trigger as a model reads it. The API's `label` describes schedules only (a data or webhook trigger gets
+ *  "invalid schedule" there), so it carries the one reading the command prints (`A.describeTrigger`). */
+const triggerOut = (t) => (t ? { ...t, label: A.describeTrigger(t) } : t);
+
+/** The two refusals a person can act on, said plainly (`A.refusal`): the beta gate's bare 404 and a dead token's
+ *  401. The error keeps its status, which the server prints in front of the message. */
 function explained(tool) {
   return { ...tool, run: async (c, args) => {
     try { return await tool.run(c, args); } catch (e) {
-      if (e.status === 401) {
-        const id = encodeURIComponent(c.creds?.account_id || "");
-        const tokenDead = await request(c.host, `/projects/reachable/accounts?account_id=${id}&per_page=1`, { token: c.token })
-          .then(() => false, (probe) => probe.status === 401);
-        e.message = tokenDead
-          ? "the CLI token is no longer valid: run `fabapp login` again"
-          : "this server does not let a CLI token manage agents yet (401): use the Studio, or update the platform.";
-      }
+      e.message = A.refusal(e, c.host) || e.message;
       throw e;
     }
   } };
@@ -78,7 +83,8 @@ export const AGENT_TOOLS = [
       const ctx = await agentCtx(c, args);
       const [agent, grants, triggers, runs] = await Promise.all([
         A.getAgent(ctx), A.listGrants(ctx), A.listTriggers(ctx), A.listRuns({ ...ctx, limit: 5 })]);
-      return { agent, grants, triggers, recent_runs: runs, studio_url: A.studioUrl(c.host, ctx.agentId) };
+      return { agent, grants, triggers: { ...triggers, items: (triggers?.items || []).map(triggerOut) },
+               recent_runs: runs, studio_url: A.studioUrl(c.host, ctx.agentId) };
     },
   },
   {
@@ -208,7 +214,7 @@ export const AGENT_TOOLS = [
         ? { project: args.project_id, model: args.table, event: args.event || "created" }
         : A.scheduleConfig({ every: args.every, at: args.at, days: args.days, tz: args.tz,
                              minutes: args.minutes, day: args.day, date: args.date });
-      return A.addTrigger({ ...ctx, kind: args.kind, config, input: args.input || "" });
+      return triggerOut(await A.addTrigger({ ...ctx, kind: args.kind, config, input: args.input || "" }));
     },
   },
   {
@@ -225,7 +231,7 @@ export const AGENT_TOOLS = [
         return { removed: true, trigger_id: args.trigger_id };
       }
       if (typeof args.enabled !== "boolean") throw new Error("give `enabled` (true/false) or `remove: true`");
-      return A.setTriggerEnabled({ ...ctx, triggerId: args.trigger_id, enabled: args.enabled });
+      return triggerOut(await A.setTriggerEnabled({ ...ctx, triggerId: args.trigger_id, enabled: args.enabled }));
     },
   },
   {
@@ -235,7 +241,9 @@ export const AGENT_TOOLS = [
       + "access it was granted and spends the account's AI credits. Outcomes: `done`; `awaiting_approval` (it "
       + "paused before an irreversible action: tell the person to approve or decline at `approve_in_studio`, there "
       + "is no tool for it); `timeout` (still working, nothing cancelled: read it later with fabapp_get_agent_run); "
-      + "`queued` (it was busy; the message is read when the current run ends). A paused agent refuses messages.",
+      + "`queued` (it was busy; the message is read when the current run ends); `awaiting_customer` (a customer "
+      + "conversation waits for the app's user to confirm in the app). `incomplete: true` on a `done` run = part of "
+      + "the job did not fit the run's step budget and was left undone. A paused agent refuses messages.",
     inputSchema: object({ account_id: ACCOUNT, agent_id: AGENT, message: { type: "string" }, wait_seconds: WAIT },
                         ["agent_id", "message"]),
     run: async (c, args) => {
@@ -265,8 +273,8 @@ export const AGENT_TOOLS = [
   {
     name: "fabapp_list_agent_runs",
     scope: "read",
-    description: "An agent's runs, newest first, 50 per page: status, what woke it (chat, manual, schedule, data), "
-      + "steps and credits.",
+    description: "An agent's runs, newest first, 50 per page: status, what woke it (chat, manual, schedule, data, "
+      + "webhook, channel, email, customer, or another agent), steps and credits.",
     inputSchema: object({ account_id: ACCOUNT, agent_id: AGENT, page: PAGE }, ["agent_id"]),
     run: async (c, args) => {
       const ctx = await agentCtx(c, args);
@@ -278,14 +286,19 @@ export const AGENT_TOOLS = [
     scope: "read",
     description: "One run: its answer (`result`), status, error and its steps (each tool the agent called, on which "
       + "app, with what access). `after` = the last step seq already read, to page through long runs "
-      + "(`steps_more` says there are more). Pending approvals are listed with the Studio link.",
+      + "(`steps_more` says there are more). Pending approvals are listed with the Studio link "
+      + "(`approve_in_studio`); a customer conversation waiting for the app's user to confirm in the app carries a "
+      + "`note` instead, since nobody decides that one in the Studio.",
     inputSchema: object({ account_id: ACCOUNT, agent_id: AGENT, run_id: { type: "string" },
       after: { type: "integer", minimum: 0 } }, ["agent_id", "run_id"]),
     run: async (c, args) => {
       const ctx = await agentCtx(c, args);
       const run = await A.getRun({ ...ctx, runId: args.run_id, after: args.after || 0 });
       const approvals = run.approvals || [];
-      return approvals.length ? { ...run, approve_in_studio: A.studioUrl(c.host, ctx.agentId) } : run;
+      if (!approvals.length) return run;
+      // The app user's own confirmation card is not the owner's to decide: no Studio link for that one.
+      return A.awaitsCustomer(run, approvals) ? { ...run, note: A.CUSTOMER_NOTE }
+                                              : { ...run, approve_in_studio: A.studioUrl(c.host, ctx.agentId) };
     },
   },
   {

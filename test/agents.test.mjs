@@ -359,3 +359,166 @@ test("the schedule flags of the new shapes are value flags, not refused as unkno
   assert.equal(flags.minutes, "30");
   assert.equal(flags.date, "2026-12-05");
 });
+
+// ---- the server as it is today ----------------------------------------------------------------------------------
+
+test("the beta gate's bare 404 says the account does not have Agents yet, never 'server too old'", async (t) => {
+  const s = await server(t, () => ({ status: 404, body: { detail: "Not Found" } }));
+  const out = [];
+  const handle = mcpServer({ host: s.host, creds: { token: "t", scope: "read write", account_id: ACC },
+                             write: (line) => out.push(JSON.parse(line)) });
+  await handle(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name: "fabapp_list_agents", arguments: {} } }));
+  assert.equal(out[0].result.isError, true);
+  const text = out[0].result.content[0].text;
+  assert.match(text, /not enabled for this account yet: it is in beta/);
+  assert.doesNotMatch(text, /update the platform|older|too old/i);
+  // An agent the API cannot find names what is missing: that one is NOT the gate.
+  assert.equal(A.notEnabled({ status: 404, body: { detail: "Agente não encontrado" } }), false);
+  assert.equal(A.notEnabled({ status: 404, body: { detail: "Not Found" } }), true);
+});
+
+test("a 401 on an agent route is the token, and says to log in again without probing another route", async (t) => {
+  const s = await server(t, () => ({ status: 401, body: { detail: "token do CLI inválido ou revogado" } }));
+  const out = [];
+  const handle = mcpServer({ host: s.host, creds: { token: "t", scope: "read write", account_id: ACC },
+                             write: (line) => out.push(JSON.parse(line)) });
+  await handle(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name: "fabapp_list_agents", arguments: {} } }));
+  assert.match(out[0].result.content[0].text, /fabapp login/);
+  assert.equal(s.calls.length, 1);
+});
+
+test("a data trigger is described from its names, not the API's schedule-only label", () => {
+  const t = { kind: "data", label: "invalid schedule", config: { project: "p1", model: "orders", event: "created" },
+              names: { app: "Loja", table: "Pedidos", table_missing: false } };
+  assert.equal(A.describeTrigger(t), "when a Pedidos record is created in Loja");
+  assert.match(A.describeTrigger({ ...t, names: undefined, project_removed: true }), /an app that was deleted/);
+  assert.equal(A.describeTrigger({ kind: "webhook", label: "invalid schedule", config: {} }), "when its webhook is called");
+  assert.equal(A.describeTrigger({ kind: "schedule", label: "Every 30 minutes", config: {} }), "Every 30 minutes");
+});
+
+test("a customer conversation's pause is the app user's, not an approval for the Studio", async (t) => {
+  const s = await server(t, () => ({ body: { id: "r", status: "awaiting_approval", origin: "customer", steps: [],
+    steps_more: false, approvals: [{ id: "a1", action: "records.update", label: "Change the booking", approver: "app_user" }] } }));
+  const out = await A.waitForRun({ host: s.host, token: "t", accountId: ACC, agentId: "op-1", run: { id: "r" } });
+  assert.equal(out.outcome, "awaiting_customer");
+  const sum = A.summarize({ host: s.host, agentId: "op-1", ...out });
+  assert.equal(sum.approve_in_studio, undefined);
+  assert.match(sum.note, /app's user/);
+});
+
+test("a run parked on another agent is waited through, and a timeout names who it waits for", async (t) => {
+  let polls = 0;
+  const s = await server(t, () => {
+    polls += 1;
+    return { body: polls === 1
+      ? { id: "r", status: "awaiting_agent", steps: [], steps_more: false, waiting_on: { run_id: "r2", agent_id: "op-2", agent_name: "Finance" } }
+      : { id: "r", status: "done", result: "ok", steps: [], steps_more: false } };
+  });
+  const out = await A.waitForRun({ host: s.host, token: "t", accountId: ACC, agentId: "op-1", run: { id: "r" }, intervalMs: 1 });
+  assert.equal(out.outcome, "done");
+  const parked = A.summarize({ host: s.host, agentId: "op-1", outcome: "timeout",
+    run: { id: "r", status: "awaiting_agent", waiting_on: { agent_name: "Finance" } } });
+  assert.match(parked.note, /another agent \(Finance\)/);
+});
+
+// ---- found in review --------------------------------------------------------------------------------------------
+
+test("a bad --timeout is refused before the run starts, not after it is already working", async (t) => {
+  const s = await server(t, ({ path }) => path === BASE ? list([AGENT])({ query: new URLSearchParams() })
+    : { status: 201, body: { id: "run-1", status: "queued" } });
+  for (const args of [["run", "Triagem", "--timeout", "5m"], ["ask", "Triagem", "oi", "--timeout", "0"]]) {
+    await assert.rejects(agents({ host: s.host, token: "t", accountId: ACC, args, log: quiet }), /--timeout/);
+  }
+  assert.ok(!s.calls.some((c) => c.method === "POST"), "the run or the message went out before the flag was read");
+});
+
+test("fabapp_get_agent_run sends nobody to the Studio for the app user's own confirmation", async (t) => {
+  const card = { id: "a1", action: "records.update", label: "Change the booking" };
+  let origin = "customer";
+  const s = await server(t, ({ path }) => path === BASE ? list([AGENT])({ query: new URLSearchParams() })
+    : { body: { id: "r", status: "awaiting_approval", origin, steps: [], steps_more: false,
+                approvals: [{ ...card, approver: origin === "customer" ? "app_user" : "owner" }] } });
+  const out = [];
+  const handle = mcpServer({ host: s.host, creds: { token: "t", scope: "read", account_id: ACC },
+                             write: (line) => out.push(JSON.parse(line)) });
+  const read = () => handle(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name: "fabapp_get_agent_run", arguments: { agent_id: "op-1", run_id: "r" } } }));
+  await read();
+  const customer = JSON.parse(out[0].result.content[0].text);
+  assert.equal(customer.approve_in_studio, undefined);
+  assert.match(customer.note, /app's user/);
+  origin = "chat";
+  await read();
+  assert.match(JSON.parse(out[1].result.content[0].text).approve_in_studio, /\/agents\/op-1$/);
+});
+
+test("a null in an update is a field that was not given: it never pauses the agent or empties a field", async (t) => {
+  const s = await server(t, () => ({ body: AGENT }));
+  await A.updateAgent({ host: s.host, token: "t", accountId: ACC, agentId: "op-1",
+                        patch: { name: "Novo", enabled: null, instructions: null, credit_cap: null, summary: "" } });
+  assert.deepEqual(s.calls[0].body, { name: "Novo", summary: "" });
+  assert.throws(() => A.updateAgent({ host: s.host, token: "t", accountId: ACC, agentId: "op-1", patch: { enabled: null } }),
+                /nothing to change/);
+});
+
+test("a draft's data trigger reads like every other one, `any` included", async (t) => {
+  const s = await server(t, () => ({ body: { name: "x", instructions: "y", resources: [], schedule: null,
+    data_trigger: { app: "Loja", table: "Pedidos", config: { project: "p1", model: "orders", event: "any" } } } }));
+  const lines = [];
+  await agents({ host: s.host, token: "t", accountId: ACC, args: ["propose", "avise quando um pedido mudar"],
+                 log: (l) => lines.push(l) });
+  assert.match(lines.join("\n"), /when a Pedidos record is changed in Loja/);
+});
+
+test("a run that ran out of steps is not reported as a finished job", async () => {
+  // The API's field is `incomplete_reason`; the run itself reads `done`.
+  const sum = A.summarize({ host: "https://api.fabapp.ai", agentId: "op-1", outcome: "done",
+    run: { id: "r", status: "done", result: "metade", incomplete_reason: "step_budget", steps_refused: 2 } });
+  assert.equal(sum.incomplete, true);
+  assert.equal(sum.incomplete_reason, "step_budget");
+  const whole = A.summarize({ host: "https://api.fabapp.ai", agentId: "op-1", outcome: "done",
+    run: { id: "r", status: "done", incomplete_reason: null } });
+  assert.equal(whole.incomplete, undefined);
+});
+
+test("a read that fails in passing does not end the wait: the run goes on, and so does the follow", async (t) => {
+  let polls = 0;
+  const s = await server(t, () => {
+    polls += 1;
+    return polls === 1 ? { status: 502, body: { detail: "bad gateway" } }
+                       : { body: { id: "r", status: "done", result: "ok", steps: [], steps_more: false } };
+  });
+  const ctx = { host: s.host, token: "t", accountId: ACC, agentId: "op-1", run: { id: "r" }, intervalMs: 1 };
+  assert.equal((await A.waitForRun(ctx)).outcome, "done");
+  // No time left (a plain read of one run): the failure is the answer. And a refusal is never asked again.
+  polls = 0;
+  await assert.rejects(A.waitForRun({ ...ctx, timeoutMs: 0 }), (e) => e.status === 502);
+  const gone = await server(t, () => ({ status: 404, body: { detail: "execução não encontrada" } }));
+  await assert.rejects(A.waitForRun({ ...ctx, host: gone.host }), (e) => e.status === 404);
+  assert.equal(gone.calls.length, 1);
+});
+
+test("over MCP a failed wait names the run that was started, and a data trigger is not an 'invalid schedule'", async (t) => {
+  const trigger = { id: "t1", kind: "data", label: "invalid schedule", enabled: true,
+                    config: { project: "p1", model: "orders", event: "created" }, names: { app: "Loja", table: "Pedidos" } };
+  const s = await server(t, ({ method, path }) => {
+    if (path === BASE) return list([AGENT])({ query: new URLSearchParams() });
+    if (path === `${BASE}/op-1`) return { body: AGENT };
+    if (path.endsWith("/triggers")) return { body: { items: [trigger], total: 1, limit: 50, offset: 0 } };
+    if (path.endsWith("/runs") && method === "POST") return { status: 201, body: { id: "run-9", status: "queued" } };
+    if (path.endsWith("/runs/run-9")) return { status: 404, body: { detail: "execução não encontrada" } };
+    return { body: { items: [], total: 0, limit: 50, offset: 0 } };
+  });
+  const out = [];
+  const handle = mcpServer({ host: s.host, creds: { token: "t", scope: "read write", account_id: ACC },
+                             write: (line) => out.push(JSON.parse(line)) });
+  const call = (name, args) => handle(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+    params: { name, arguments: args } }));
+  await call("fabapp_get_agent", { agent_id: "op-1" });
+  assert.equal(JSON.parse(out[0].result.content[0].text).triggers.items[0].label, "when a Pedidos record is created in Loja");
+  await call("fabapp_run_agent", { agent_id: "op-1", wait_seconds: null });
+  assert.equal(out[1].result.isError, true);
+  assert.match(out[1].result.content[0].text, /Run run-9 was started.*do not start it again/);
+});

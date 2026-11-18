@@ -19,6 +19,36 @@ export const DATA_EVENTS = ["created", "updated", "deleted", "any"];
 /** Statuses after which a run never changes again (`service.TERMINAL_STATUSES`). */
 export const TERMINAL = new Set(["done", "error", "canceled", "expired"]);
 export const PAUSED_FOR_APPROVAL = "awaiting_approval";
+/**
+ * A run of a customer conversation paused on the CUSTOMER's own confirmation card: the app's end user decides it in
+ * the app (the card's `approver` is `app_user`), and the owner's Studio routes refuse it. Not a server status: the
+ * same reading the API's agent list and the Studio make of `awaiting_approval` on a run whose `origin` is `customer`.
+ */
+export const AWAITING_CUSTOMER = "awaiting_customer";
+/** Parked on another agent's run (`ask_agent`): still busy, and it resumes by itself when that run ends. */
+export const AWAITING_AGENT = "awaiting_agent";
+
+/**
+ * The gate's answer. While Fabapp Agents is in beta, every agent route answers a plain 404 `{"detail": "Not Found"}`
+ * (FastAPI's own, the answer an address that does not exist gets) to an account outside it. The API's own "not
+ * found" answers on these routes all name what is missing ("Agente não encontrado", "gatilho não encontrado"), so the
+ * bare one is the gate.
+ */
+export function notEnabled(e) {
+  return e?.status === 404 && e?.body?.detail === "Not Found";
+}
+export const NOT_ENABLED = "Fabapp Agents is not enabled for this account yet: it is in beta.";
+
+/**
+ * The two refusals a person can act on, in one line each, or null for any other failure: the beta gate's bare 404,
+ * and a 401, which on these routes is the token itself (unknown, revoked, or its owner suspended). One reading for
+ * the command and the MCP tools, instead of "Not Found" or "token inválido".
+ */
+export function refusal(e, host) {
+  if (notEnabled(e)) return NOT_ENABLED;
+  if (e?.status === 401) return `the CLI token for ${host} is no longer valid: run \`fabapp login\` again`;
+  return null;
+}
 
 const enc = encodeURIComponent;
 const base = (accountId) => `/accounts/${enc(accountId)}/operators`;
@@ -115,10 +145,14 @@ export function createAgent({ host, token, accountId, name, summary, instruction
   return request(host, base(accountId), { method: "POST", token, body });
 }
 
-/** Only the fields that were given travel: the API applies a PATCH-like PUT, and an absent key is left alone. */
+/**
+ * Only the fields that were given travel: the API applies a PATCH-like PUT, and an absent key is left alone. `null`
+ * counts as not given: the server reads a present key, so a null (an MCP client filling in what it left out) would
+ * pause the agent (`enabled`), empty its instructions or drop its credit cap.
+ */
 const EDITABLE = ["name", "summary", "instructions", "model", "enabled", "step_budget", "credit_cap", "deliver_email"];
 export function updateAgent({ host, token, accountId, agentId, patch }) {
-  const body = Object.fromEntries(Object.entries(patch || {}).filter(([k, v]) => EDITABLE.includes(k) && v !== undefined));
+  const body = Object.fromEntries(Object.entries(patch || {}).filter(([k, v]) => EDITABLE.includes(k) && v != null));
   if (!Object.keys(body).length) throw new Error(`nothing to change: give at least one of ${EDITABLE.join(", ")}`);
   return request(host, `${base(accountId)}/${enc(agentId)}`, { method: "PUT", token, body });
 }
@@ -332,17 +366,18 @@ export function sendMessage({ host, token, accountId, agentId, text }) {
   return request(host, `${base(accountId)}/${enc(agentId)}/messages`, { method: "POST", token, body: { text } });
 }
 
-/** The newest page of the chat thread (`before` = the oldest seq already seen, for the page before it). */
-export function thread({ host, token, accountId, agentId, limit = 30, before }) {
-  const qs = new URLSearchParams({ limit: String(limit) });
-  if (before) qs.set("before", String(before));
-  return request(host, `${base(accountId)}/${enc(agentId)}/messages?${qs}`, { token });
-}
+/** A failure of the request and not of the run: the server unreachable, a gateway's 5xx, a rate limit. */
+const transient = (e) => e?.status === 0 || e?.status === 429 || e?.status >= 500;
 
 /**
  * Follows a run until it ENDS, PAUSES for an approval, or `timeoutMs` passes, whichever comes first. `onStep` gets
  * each new step once, in order. Answers `{run, steps, approvals, outcome}` with `outcome` one of `done`, `error`,
- * `canceled`, `expired`, `awaiting_approval` or `timeout` (the run goes on without us; nothing was cancelled).
+ * `canceled`, `expired`, `awaiting_approval`, `awaiting_customer` or `timeout` (the run goes on without us; nothing
+ * was cancelled). `queued`, `running` and `awaiting_agent` (parked on another agent's run) are waited through.
+ *
+ * A read that fails in passing (a 502 while the platform deploys, a dropped connection) is asked again until the
+ * deadline: the run goes on in the server either way, and giving up on the first blip left the caller with an error
+ * for a run that was working, and no answer to read.
  */
 export async function waitForRun({ host, token, accountId, agentId, run, timeoutMs = 600_000, intervalMs = 2000,
                                    onStep = () => {} }) {
@@ -351,7 +386,14 @@ export async function waitForRun({ host, token, accountId, agentId, run, timeout
   const steps = [];
   let current = run;
   for (;;) {
-    const detail = await getRun({ host, token, accountId, agentId, runId: current.id, after });
+    let detail;
+    try {
+      detail = await getRun({ host, token, accountId, agentId, runId: current.id, after });
+    } catch (e) {
+      if (!transient(e) || Date.now() >= deadline) throw e;
+      await sleep(intervalMs);
+      continue;
+    }
     const before = after;
     for (const s of detail.steps || []) { steps.push(s); onStep(s); after = Math.max(after, s.seq || 0); }
     current = detail;
@@ -360,10 +402,41 @@ export async function waitForRun({ host, token, accountId, agentId, run, timeout
     // advancing it would otherwise be asked for again forever, with no pause and no deadline.
     if (detail.steps_more && after > before) continue;
     if (TERMINAL.has(detail.status)) return { run: detail, steps, approvals, outcome: detail.status };
-    if (detail.status === PAUSED_FOR_APPROVAL) return { run: detail, steps, approvals, outcome: PAUSED_FOR_APPROVAL };
+    if (detail.status === PAUSED_FOR_APPROVAL) {
+      const outcome = awaitsCustomer(detail, approvals) ? AWAITING_CUSTOMER : PAUSED_FOR_APPROVAL;
+      return { run: detail, steps, approvals, outcome };
+    }
     if (Date.now() >= deadline) return { run: detail, steps, approvals, outcome: "timeout" };
     await sleep(intervalMs);
   }
+}
+
+/**
+ * Whether a paused run waits for the app's end user (in the app) and not for the owner (in the Studio). The one
+ * reading for every place that tells the two apart: the wait's outcome, the list's state and the run read over MCP.
+ * A list row carries no cards, so there it is the run's `origin` alone.
+ */
+export function awaitsCustomer(run, approvals = []) {
+  return run?.status === PAUSED_FOR_APPROVAL
+    && (run.origin === "customer" || (approvals.length > 0 && approvals.every((a) => a.approver === "app_user")));
+}
+export const CUSTOMER_NOTE = "The run waits for the app's user to confirm in the app. Neither the Studio nor the "
+  + "CLI decides it.";
+
+/**
+ * A trigger in one line, in English. The API's `label` describes SCHEDULES only (a data or webhook trigger gets
+ * "invalid schedule" there), so a data trigger is told from its `names` (the app's and the table's names).
+ */
+export function describeTrigger(t) {
+  if (t.kind === "data") {
+    const c = t.config || {};
+    const n = t.names || {};
+    const where = t.project_removed ? "an app that was deleted" : (n.app || c.project);
+    return `when a ${n.table || c.model} record is ${c.event === "any" ? "changed" : c.event} in ${where}`
+      + (n.table_missing ? " (the table is no longer in the app)" : "");
+  }
+  if (t.kind === "webhook") return "when its webhook is called";
+  return t.label || JSON.stringify(t.config || {});
 }
 
 /** A run reduced to what a caller reads: the answer, why it stopped, and what it is waiting for. */
@@ -376,14 +449,25 @@ export function summarize({ host, agentId, run, approvals = [], outcome }) {
   if (approvals.length) {
     out.waiting_for_approval = approvals.map((a) => ({ id: a.id, action: a.action, label: a.label }));
   }
-  if (outcome === PAUSED_FOR_APPROVAL || approvals.length) {
+  if (run.waiting_on) out.waiting_on = run.waiting_on;
+  if (outcome === AWAITING_CUSTOMER) {
+    out.note = CUSTOMER_NOTE;
+  } else if (outcome === PAUSED_FOR_APPROVAL || approvals.length) {
     out.approve_in_studio = studioUrl(host, agentId);
     out.note = "The run is paused until a person approves or declines in the Studio. It cannot be approved from "
       + "the CLI or MCP.";
   }
   if (outcome === "timeout") {
-    out.note = "Still working. Nothing was cancelled: read it later with the run id.";
+    out.note = run.status === AWAITING_AGENT
+      ? `Waiting for another agent${run.waiting_on?.agent_name ? ` (${run.waiting_on.agent_name})` : ""} to answer; it `
+        + "goes on by itself. Nothing was cancelled: read it later with the run id."
+      : "Still working. Nothing was cancelled: read it later with the run id.";
   }
-  if (run.incomplete) out.incomplete = true;
+  // The API's field is `incomplete_reason` (`step_budget`: part of the job did not fit the run's steps). A run that
+  // ended like that reads `done`, so without this it is reported as a job finished.
+  if (run.incomplete_reason) {
+    out.incomplete = true;
+    out.incomplete_reason = run.incomplete_reason;
+  }
   return out;
 }

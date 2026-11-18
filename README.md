@@ -118,8 +118,9 @@ It uses the credential `fabapp login` already stored — it never asks for a sec
 
 The agent tools mirror `fabapp agents`. `fabapp_delete_agent` is permanent and takes `confirm: true`.
 `fabapp_ask_agent` and `fabapp_run_agent` wait up to `wait_seconds` (default 60, max 300) and answer the outcome:
-`done` with the `result`, `awaiting_approval` with `approve_in_studio` (there is no approve tool, on purpose),
-`timeout`, or `queued`.
+`done` with the `result` (`incomplete: true` when part of the job did not fit the run's steps), `awaiting_approval`
+with `approve_in_studio` (there is no approve tool, on purpose), `awaiting_customer` (a customer conversation waiting
+for the app's user to confirm in the app), `timeout`, or `queued`.
 
 **The scope decides the list.** A token granted read-only does not *see* the write tools. Advertising one that will
 answer 403 is worse than not advertising it: the model tries, fails, and tries again with different arguments — the
