@@ -78,6 +78,8 @@ export function createServer({ host, creds, write, exit = () => {} }) {
         instructions: `Account ${creds?.account_id || "?"} · scope: ${scopes}.`
           + " Call `fabapp_docs` FIRST: the field types are a closed list and the access rules decide who can read"
           + " an app's data. Then `fabapp_read_definition` for the project you are working on."
+          + " The account's AI agents (Fabapp Agents) are the `fabapp_*agent*` tools; an agent's paused actions are"
+          + " approved by a person in the Studio, never through these tools."
           + (scopes.includes("write") ? "" : " Read-only: no write tool is available."),
       };
     },

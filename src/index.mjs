@@ -10,6 +10,8 @@ import { pathToFileURL } from "node:url";
 
 import { findRoot, read } from "./config.mjs";
 import { clear, load } from "./credentials.mjs";
+import { agents, AGENTS_USAGE } from "./commands/agents.mjs";
+import { refusal } from "./agents.mjs";
 import { create } from "./commands/create.mjs";
 import { deploy } from "./commands/deploy.mjs";
 import { dev } from "./commands/dev.mjs";
@@ -37,6 +39,8 @@ const USAGE = `
     fabapp pull                            bring the project's definition to disk
     fabapp push                            send back what is on disk
     fabapp deploy [--no-publish]           upload what you edited in the workspace, then publish
+    fabapp agents [list|show|create|…]     the account's AI agents: create, give them apps, schedule, talk to them
+                                           (\`fabapp agents help\` for every subcommand)
     fabapp mcp                             MCP server over stdio — for Claude Code and friends
 
   The API base comes from FABAPP_API_URL (default: ${DEFAULT_HOST}).
@@ -116,6 +120,24 @@ export async function main(argv = process.argv.slice(2)) {
       if (!creds?.token) throw new Error(`not authorised for ${host} — run \`fabapp login\``);
       await link({ host, token: creds.token, projectId, root: process.cwd(), log });
       return 0;
+    }
+
+    case "agents": {
+      // Account-level, like `projects`: no linked folder is needed. A linked one only supplies the default app for
+      // `grant`, `revoke`, `watch` and `list --here`.
+      if (rest[0] === "help" || rest.includes("--help")) { log(AGENTS_USAGE); return 0; }
+      const creds = load(host);
+      if (!creds?.token) throw new Error(`not authorised for ${host} — run \`fabapp login\``);
+      try {
+        // Inside the `try`: with `--account` this is the first request, so it is the one a dead token's 401 comes from.
+        const accountId = await resolveAccount({ host, token: creds.token, accountId: creds.account_id,
+                                                 wanted: flag(argv, "account", "") });
+        return await agents({ host, token: creds.token, accountId, scope: creds.scope, args: rest, log });
+      } catch (e) {
+        // The beta gate's bare 404 and a dead token's 401, each said plainly (`refusal`).
+        const why = refusal(e, host);
+        throw why ? new Error(why) : e;
+      }
     }
 
     case "mcp": {
