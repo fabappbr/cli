@@ -12,10 +12,10 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { request } from "../api.mjs";
-import { fingerprint, platformFingerprint, readDeps, readStamp, writeStamp } from "../workspace.mjs";
+import { fingerprint, platformFingerprint, readDeps, readStamp, safeJoin, writeStamp } from "../workspace.mjs";
 
 /** Unzips with whatever the OS ships. `unzip` first, `tar` second (bsdtar on macOS and Windows 10+ read zip). */
 function unzip(zip, into) {
@@ -86,6 +86,12 @@ export async function dev({ host, token, projectId, root, app: wanted, reset = f
     execFileSync("cp", ["-R", onlyChild(staging) + "/", workspace + "/"]);
     rmSync(zip, { force: true });
     rmSync(staging, { recursive: true, force: true });
+    // BEFORE the fingerprint, so the functions count as "what came from the platform" and only an edit sends one.
+    try {
+      await restoreFunctions({ host, token, projectId, appId: app.id, workspace, log });
+    } catch (e) {
+      log(`  ⚠ Could not bring the backend functions into the workspace (${e.message}); \`deploy\` keeps the server's.`);
+    }
     // The FINGERPRINT of every file, taken now that the workspace is exactly what the platform handed over. It is
     // what lets `deploy` send only what YOU changed, instead of pushing the platform's files along with it.
     // `deps` and `platform` are the same idea for the two things that live outside `src/`: the dependencies the
@@ -118,6 +124,33 @@ export async function dev({ host, token, projectId, root, app: wanted, reset = f
 
   log(`\n  Starting Vite in .fabapp/workspace…\n`);
   return run(workspace, port);
+}
+
+/**
+ * The app's backend functions (`functions/*`), written into a workspace the export left without them.
+ *
+ * The export zip is built by the same materialize step as the SPA build, and that step keeps `functions/` out of the
+ * workspace on purpose (it is server code, not part of the bundle). So the workspace came with `fab.functions.json`
+ * and no function files: the person could not read or edit the functions the manifest names, and a function
+ * written here from scratch under an existing name would go up over the server's copy. They come from the app's code
+ * (`GET /code`, the same read `deploy` starts from). Only files ABSENT from the workspace are written, so an export
+ * that one day carries them stays the source, and nothing here is overwritten.
+ */
+export async function restoreFunctions({ host, token, projectId, appId, workspace, log }) {
+  const base = `/projects/${encodeURIComponent(projectId)}/apps/${encodeURIComponent(appId)}`;
+  const code = await request(host, `${base}/code`, { token });
+  const written = [];
+  for (const f of code?.files || []) {
+    const path = String(f?.path || "").replace(/^\.\//, "");
+    if (!path.startsWith("functions/") || typeof f.content !== "string") continue;
+    const target = safeJoin(workspace, path);
+    if (existsSync(target)) continue;
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, f.content);
+    written.push(path);
+  }
+  if (written.length) log(`  ✓ ${written.length} backend function(s) in .fabapp/workspace/functions`);
+  return written;
 }
 
 function defaultInstall(workspace) {

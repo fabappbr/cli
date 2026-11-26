@@ -47,7 +47,9 @@ export async function deploy({ host, token, projectId, root, log, publish = true
   // alone, `changes()` reads it as "new" and `deploy` would put an old manifest over whatever the Studio has now —
   // the file that decides who may call each function, rewritten by nobody. So it only goes up when the server has
   // no such file; otherwise it stays home, and the stamp learns it on the next publish.
-  const stale = added.filter((p) => ROOT_FILES.includes(p));
+  // The same holds for a backend function: workspaces assembled before `dev` wrote `functions/*` have none in their
+  // stamp, so a file written there under a name the app already has would replace the server's function unseen.
+  const stale = added.filter((p) => ROOT_FILES.includes(p) || p.startsWith("functions/"));
   let current = null;
   if (stale.length) {
     current = await request(host, `${base}/code`, { token });

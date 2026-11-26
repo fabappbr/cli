@@ -246,7 +246,7 @@ test("a host that is not there says so, instead of throwing a TypeError", async 
 
 // ---- dev ---------------------------------------------------------------------------------------------------------
 
-import { dev } from "../src/commands/dev.mjs";
+import { dev, restoreFunctions } from "../src/commands/dev.mjs";
 
 /** A workspace that already exists, with the person's edits in it and a stamp saying where it came from. */
 function existingWorkspace(root, templateSig) {
@@ -551,6 +551,57 @@ test("deploy does not put an untracked root manifest over the server's", async (
   assert.equal(sent.get("fab.functions.json"), '{"functions":{"contact":{"auth":"role:admin"}}}');   // the server's stays
   assert.equal(sent.get("fab.agents.json"), '{"agents":[]}');
   assert.ok(lines.some((l) => l.includes("fab.functions.json") && l.includes("NOT uploaded")));
+});
+
+test("deploy does not put an untracked function over the server's", async (t) => {
+  // A workspace assembled before `dev` brought `functions/*` down: a function written here under a name the app
+  // already has is not in the stamp, and must not replace the server's copy unseen. A new name goes up.
+  const puts = [];
+  const s = await server(t, ({ method, body }) => {
+    if (method === "PUT") { puts.push(body); return { body: { ok: true, code_rev: 2, provided_ignored: [] } }; }
+    return { body: { files: [{ path: "functions/sync-cards.ts", content: "// the server's" }], code_rev: 1 } };
+  });
+  const root = dir();
+  const ws = stampedWorkspace(root, s.host);
+  mkdirSync(join(ws, "functions"), { recursive: true });
+  writeFileSync(join(ws, "functions", "sync-cards.ts"), "// written here blind");
+  writeFileSync(join(ws, "functions", "brand-new.ts"), "// new");
+  const lines = [];
+  await deploy({ host: s.host, token: "t", projectId: "p1", root, log: (l) => lines.push(l), publish: false });
+
+  const sent = new Map(puts[0].files.map((f) => [f.path, f.content]));
+  assert.equal(sent.get("functions/sync-cards.ts"), "// the server's");
+  assert.equal(sent.get("functions/brand-new.ts"), "// new");
+  assert.ok(lines.some((l) => l.includes("functions/sync-cards.ts") && l.includes("NOT uploaded")));
+});
+
+test("dev brings the app's functions into a fresh workspace, without overwriting and inside it", async (t) => {
+  // The export zip leaves `functions/` out (the SPA build's materialize does), so they come from `GET /code`.
+  const s = await server(t, () => ({ body: { files: [
+    { path: "functions/link-cards.ts", content: "// server link" },
+    { path: "functions/already-here.ts", content: "// server copy" },
+    { path: "src/pages/Home.tsx", content: "// not a function" },
+  ], code_rev: 3 } }));
+  const root = dir();
+  const ws = join(root, ".fabapp", "workspace");
+  mkdirSync(join(ws, "functions"), { recursive: true });
+  writeFileSync(join(ws, "functions", "already-here.ts"), "// from the zip");
+
+  const written = await restoreFunctions({ host: s.host, token: "t", projectId: "p1", appId: "a1", workspace: ws,
+                                           log: quiet });
+  assert.deepEqual(written, ["functions/link-cards.ts"]);
+  assert.equal(readFileSync(join(ws, "functions", "link-cards.ts"), "utf8"), "// server link");
+  assert.equal(readFileSync(join(ws, "functions", "already-here.ts"), "utf8"), "// from the zip");
+  assert.ok(!existsSync(join(ws, "src", "pages", "Home.tsx")));
+  assert.equal(s.calls[0].url, "/projects/p1/apps/a1/code");
+});
+
+test("dev refuses a function path from the server that escapes the workspace", async (t) => {
+  const s = await server(t, () => ({ body: { files: [{ path: "functions/../../../evil.ts", content: "x" }] } }));
+  const ws = join(dir(), ".fabapp", "workspace");
+  mkdirSync(ws, { recursive: true });
+  await assert.rejects(() => restoreFunctions({ host: s.host, token: "t", projectId: "p1", appId: "a1", workspace: ws,
+                                                log: quiet }), /escapes the project/);
 });
 
 test("a path from the server that escapes the project is refused", async (t) => {
