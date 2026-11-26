@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+**The workspace brings the app's backend functions.** `fabapp dev` now writes `functions/*.ts` into a new
+`.fabapp/workspace` (the export package left them out, while `fab.functions.json` came along), so they can be read
+and edited like the rest of the code. `fabapp deploy` will not put a function the workspace never recorded over the
+server's copy: it says so and keeps the server's (`fabapp dev --reset` starts from it). A deploy still never deletes
+a function that is missing here. `fabapp pull` → `fabapp push` of an app config that carries the app's subdomain
+works again (the server accepts the unchanged value and still refuses a changed one).
+
 ## 0.2.0
 
 **Fabapp Agents from the terminal and from Claude Code.** `fabapp agents` creates and edits the account's AI agents,
